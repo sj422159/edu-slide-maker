@@ -1,0 +1,9 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+
+# Generated presentations
+*.pptx
+*.zip
+*.pdf

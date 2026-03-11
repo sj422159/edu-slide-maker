@@ -1,0 +1,6 @@
+streamlit
+python-pptx
+google-genai
+Pillow
+requests
+fpdf2
