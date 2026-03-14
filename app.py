@@ -1,5 +1,6 @@
 import streamlit as st
 import os, json, requests, re, time, zipfile
+import ast
 from urllib.parse import quote_plus
 from google import genai
 from google.genai import types
@@ -42,7 +43,6 @@ GEMINI_MODELS = [
     "gemini-2.5-flash",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite-preview",
-    
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
@@ -51,19 +51,170 @@ GEMINI_MODELS = [
 ]
 
 def parse_json_response(text):
-    cleaned = re.sub(r'^```(?:json)?\s*\n?', '', text.strip(), flags=re.MULTILINE)
-    cleaned = re.sub(r'\n?```\s*$', '', cleaned.strip(), flags=re.MULTILINE)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r'\[.*\]', cleaned, re.DOTALL)
-    if match:
+    def _strip_fences(raw):
+        cleaned_local = re.sub(r'^```(?:json)?\s*\n?', '', raw.strip(), flags=re.MULTILINE)
+        return re.sub(r'\n?```\s*$', '', cleaned_local.strip(), flags=re.MULTILINE)
+
+    def _extract_first_json_array(raw):
+        start = raw.find('[')
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(raw)):
+            ch = raw[i]
+            if in_str:
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == '[':
+                depth += 1
+            elif ch == ']':
+                depth -= 1
+                if depth == 0:
+                    return raw[start:i + 1]
+        return None
+
+    def _sanitize_json_like(raw):
+        sanitized = raw
+        sanitized = sanitized.replace('\u201c', '"').replace('\u201d', '"')
+        sanitized = sanitized.replace('\u2018', "'").replace('\u2019', "'")
+        sanitized = re.sub(r',\s*([}\]])', r'\1', sanitized)  # remove trailing commas
+        sanitized = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', sanitized)
+        return sanitized.strip()
+
+    cleaned = _strip_fences(text)
+
+    candidates = [cleaned]
+    first_array = _extract_first_json_array(cleaned)
+    if first_array:
+        candidates.append(first_array)
+    candidates.append(_sanitize_json_like(cleaned))
+    if first_array:
+        candidates.append(_sanitize_json_like(first_array))
+
+    for candidate in candidates:
         try:
-            return json.loads(match.group())
+            parsed = json.loads(candidate)
+            if isinstance(parsed, list):
+                return parsed
         except json.JSONDecodeError:
-            pass
+            continue
+
+    # Last fallback for Python-like list/dict output with single quotes.
+    for candidate in candidates:
+        try:
+            parsed = ast.literal_eval(candidate)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            continue
+
     raise ValueError(f"Could not parse JSON from response:\n{text[:500]}")
+
+
+def repair_slides_json(raw_text):
+    repair_prompt = f"""You are a strict JSON repair assistant.
+Fix the following malformed JSON-like content into VALID JSON.
+
+Rules:
+- Output ONLY a JSON array.
+- Preserve intended slide content and order.
+- Ensure each item is an object with keys: type, title, body, search_query, section_number (use null/empty where not applicable).
+- Do not include markdown fences.
+
+Malformed content:
+{raw_text[:12000]}
+"""
+    repaired = gemini_generate(repair_prompt, response_mime='application/json')
+    return parse_json_response(repaired.text)
+
+
+def normalize_slides_data(slides_data, class_num, subject, chapter, use_images):
+    if not isinstance(slides_data, list):
+        raise ValueError("Model output is not a slide list.")
+
+    normalized = []
+    for i, slide in enumerate(slides_data):
+        if not isinstance(slide, dict):
+            continue
+        s_type = str(slide.get('type', 'content')).strip().lower()
+        if s_type not in ('title', 'section', 'content', 'diagram', 'summary'):
+            s_type = 'content'
+
+        title = str(slide.get('title') or f"Slide {i + 1}").strip()
+        body = slide.get('body', [])
+        if isinstance(body, str):
+            body = [b.strip() for b in re.split(r'[\n\r]+', body) if b.strip()]
+        elif not isinstance(body, list):
+            body = []
+        body = [str(b).strip() for b in body if str(b).strip()]
+
+        search_query = str(slide.get('search_query', '') or '').strip()
+        section_number = slide.get('section_number', None)
+
+        if s_type in ('content', 'diagram', 'summary') and not body:
+            body = [f"Key points about {title}"]
+
+        if s_type == 'diagram' and not search_query:
+            search_query = f"labeled diagram of {title}"
+
+        normalized.append({
+            'type': s_type,
+            'title': title,
+            'body': body,
+            'search_query': search_query,
+            'section_number': section_number,
+        })
+
+    if not normalized:
+        raise ValueError("No valid slide objects were produced by the model.")
+
+    # Enforce first slide as title.
+    if normalized[0]['type'] != 'title':
+        normalized.insert(0, {
+            'type': 'title',
+            'title': chapter,
+            'body': [f"Class {class_num} {subject}"],
+            'search_query': '',
+            'section_number': None,
+        })
+
+    # Enforce diagrams when image mode is enabled.
+    if use_images:
+        min_diagrams = 8
+        diag_count = sum(1 for s in normalized if s['type'] == 'diagram')
+        if diag_count < min_diagrams:
+            for s in normalized:
+                if diag_count >= min_diagrams:
+                    break
+                if s['type'] == 'content':
+                    s['type'] = 'diagram'
+                    if not s['search_query']:
+                        s['search_query'] = f"labeled diagram of {s['title']}"
+                    diag_count += 1
+
+    return normalized
+
+
+def normalize_pdf_text(text, unicode_fonts):
+    if text is None:
+        return ""
+    cleaned = str(text)
+    cleaned = cleaned.replace('—', '-').replace('–', '-')
+    cleaned = cleaned.replace('“', '"').replace('”', '"')
+    cleaned = cleaned.replace('’', "'").replace('•', '-')
+    cleaned = cleaned.replace('▸', '-').replace('✦', '*')
+    if not unicode_fonts:
+        cleaned = cleaned.encode('latin-1', 'ignore').decode('latin-1')
+    return cleaned
 
 def gemini_generate(prompt, response_mime='application/json'):
     """Try each model in GEMINI_MODELS; on rate limit move to the next."""
@@ -364,7 +515,7 @@ Return ONLY the JSON array, no other text."""
 
 GEMINI_PROMPT_TEXT_ONLY = """You are an expert {subject} teacher. Create a detailed, text-heavy presentation on "{chapter}" for Class {class_num} students.
 
-Return a JSON array of exactly 30 slide objects. Each slide must have these keys:
+Return a JSON array of exactly 25-50 slide objects. Each slide must have these keys:
 - "type": one of "title", "section", "content", "summary"
 - "title": slide heading
 - "body": array of 6-8 detailed, informative bullet point strings. Each bullet should be a complete explanation (15-25 words) that teaches the concept clearly. NOT needed for title/section slides.
@@ -399,7 +550,22 @@ The notes should include:
 - Summary at the end
 
 Format the notes in clean Markdown with proper headings (#, ##, ###), bullet points, bold for key terms, and tables where useful.
-Make it detailed enough that a student can use these notes alone to study for exams."""
+Make it detailed enough that a student can use these notes alone to study for exams.
+
+The notes must represent the FULL chapter in depth, not a brief summary."""
+
+NOTES_PROMPT_WITH_IMAGES = """You are an expert {subject} teacher. Write comprehensive, full-chapter study notes on "{chapter}" for Class {class_num} students.
+
+Requirements:
+- Cover the complete chapter in depth so students can study from these notes alone.
+- Include chapter overview, all key concepts, definitions, formulas, solved examples, comparisons, and exam tips.
+- Include a section titled "## Diagram Guide" with at least 8 entries.
+- For each diagram entry use this exact format:
+    - Diagram Title: <short title>
+    - Search Query: <image search query for a labeled educational diagram>
+    - Why It Matters: <1-2 lines>
+
+Return Markdown only."""
 
 # ==========================================
 # PPT GENERATION
@@ -415,7 +581,17 @@ def generate_ppt(class_num, subject, chapter, use_images):
         )
 
     response = gemini_generate(prompt)
-    slides_data = parse_json_response(response.text)
+    try:
+        slides_data = parse_json_response(response.text)
+    except ValueError:
+        try:
+            slides_data = repair_slides_json(response.text)
+        except Exception as repair_err:
+            raise ValueError(
+                f"Could not parse slide JSON from model output. Repair failed: {repair_err}"
+            )
+
+    slides_data = normalize_slides_data(slides_data, class_num, subject, chapter, use_images)
 
     prs = Presentation()
     prs.slide_width, prs.slide_height = SLIDE_W, SLIDE_H
@@ -461,10 +637,11 @@ def generate_ppt(class_num, subject, chapter, use_images):
 
     safe_name = re.sub(r'[^\w\s-]', '', chapter).strip().replace(' ', '_')
     filename = f"Class{class_num}_{subject}_{safe_name}.pptx"
-    return buf, filename
+    return buf, filename, slides_data
 
-def generate_notes(class_num, subject, chapter):
-    prompt = NOTES_PROMPT.format(
+def generate_notes(class_num, subject, chapter, use_images=False, slides_data=None):
+    prompt_tmpl = NOTES_PROMPT_WITH_IMAGES if use_images else NOTES_PROMPT
+    prompt = prompt_tmpl.format(
         class_num=class_num, subject=subject, chapter=chapter
     )
     notes_text = gemini_generate_text(prompt)
@@ -483,9 +660,17 @@ def generate_notes(class_num, subject, chapter):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=20)
     win_font = os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts')
-    pdf.add_font('Arial', '', os.path.join(win_font, 'arial.ttf'), uni=True)
-    pdf.add_font('Arial', 'B', os.path.join(win_font, 'arialbd.ttf'), uni=True)
-    pdf.add_font('Arial', 'I', os.path.join(win_font, 'ariali.ttf'), uni=True)
+    unicode_fonts = True
+
+    try:
+        pdf.add_font('Arial', '', os.path.join(win_font, 'arial.ttf'), uni=True)
+        pdf.add_font('Arial', 'B', os.path.join(win_font, 'arialbd.ttf'), uni=True)
+        pdf.add_font('Arial', 'I', os.path.join(win_font, 'ariali.ttf'), uni=True)
+        font_family = 'Arial'
+    except Exception:
+        # Fallback to built-in fonts if Windows Arial files are unavailable.
+        unicode_fonts = False
+        font_family = 'Helvetica'
 
     # --- Cover Page ---
     pdf.add_page()
@@ -503,24 +688,24 @@ def generate_notes(class_num, subject, chapter):
 
     # Title
     pdf.set_y(95)
-    pdf.set_font('Arial', 'B', 28)
+    pdf.set_font(font_family, 'B', 28)
     pdf.set_text_color(*GOLD)
-    pdf.multi_cell(0, 14, chapter, align='C')
+    pdf.multi_cell(0, 14, normalize_pdf_text(chapter, unicode_fonts), align='C')
 
     # Subtitle
     pdf.ln(5)
-    pdf.set_font('Arial', '', 16)
+    pdf.set_font(font_family, '', 16)
     pdf.set_text_color(*WHITE_TEXT)
-    pdf.multi_cell(0, 9, f"Class {class_num}  |  {subject}", align='C')
+    pdf.multi_cell(0, 9, normalize_pdf_text(f"Class {class_num}  |  {subject}", unicode_fonts), align='C')
 
     # Bottom accent line
     pdf.set_draw_color(*CYAN)
     pdf.line(40, pdf.h - 40, pdf.w - 40, pdf.h - 40)
 
-    pdf.set_font('Arial', 'I', 10)
+    pdf.set_font(font_family, 'I', 10)
     pdf.set_text_color(*BULLET_COL)
     pdf.set_y(pdf.h - 35)
-    pdf.multi_cell(0, 6, "Study Notes  |  Generated by SkillRev AI", align='C')
+    pdf.multi_cell(0, 6, normalize_pdf_text("Study Notes  |  Generated by SkillRev AI", unicode_fonts), align='C')
 
     # --- Content Pages ---
     def new_content_page():
@@ -530,10 +715,10 @@ def generate_notes(class_num, subject, chapter):
         # Header bar
         pdf.set_fill_color(*DARK_CARD)
         pdf.rect(0, 0, pdf.w, 14, 'F')
-        pdf.set_font('Arial', 'B', 8)
+        pdf.set_font(font_family, 'B', 8)
         pdf.set_text_color(*CYAN)
         pdf.set_xy(10, 4)
-        pdf.cell(0, 6, f"Class {class_num}  |  {subject}  |  {chapter}", align='L')
+        pdf.cell(0, 6, normalize_pdf_text(f"Class {class_num}  |  {subject}  |  {chapter}", unicode_fonts), align='L')
         # Logo in header
         if os.path.exists(LOGO_PATH):
             pdf.image(LOGO_PATH, x=pdf.w - 22, y=2, h=10)
@@ -556,9 +741,9 @@ def generate_notes(class_num, subject, chapter):
         if stripped.startswith('### '):
             # Sub-sub heading - cyan accent
             pdf.ln(4)
-            pdf.set_font('Arial', 'B', 13)
+            pdf.set_font(font_family, 'B', 13)
             pdf.set_text_color(*CYAN)
-            text = re.sub(r'\*\*(.+?)\*\*', r'\1', stripped[4:])
+            text = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', stripped[4:]), unicode_fonts)
             pdf.multi_cell(0, 7, text)
             # Thin cyan underline
             y = pdf.get_y()
@@ -577,18 +762,18 @@ def generate_notes(class_num, subject, chapter):
             pdf.set_fill_color(*GOLD)
             pdf.rect(pdf.l_margin, y, 3, 12, 'F')
             pdf.set_xy(pdf.l_margin + 6, y + 1)
-            pdf.set_font('Arial', 'B', 15)
+            pdf.set_font(font_family, 'B', 15)
             pdf.set_text_color(*GOLD)
-            text = re.sub(r'\*\*(.+?)\*\*', r'\1', stripped[3:])
+            text = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', stripped[3:]), unicode_fonts)
             pdf.cell(0, 10, text)
             pdf.ln(16)
 
         elif stripped.startswith('# '):
             # Main heading - large gold
             pdf.ln(8)
-            pdf.set_font('Arial', 'B', 20)
+            pdf.set_font(font_family, 'B', 20)
             pdf.set_text_color(*GOLD)
-            text = re.sub(r'\*\*(.+?)\*\*', r'\1', stripped[2:])
+            text = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', stripped[2:]), unicode_fonts)
             pdf.multi_cell(0, 11, text, align='C')
             # Gold line
             y = pdf.get_y() + 1
@@ -601,11 +786,11 @@ def generate_notes(class_num, subject, chapter):
             # Bullet point with cyan dot
             pdf.set_x(pdf.l_margin + 5)
             bullet_text = stripped[2:]
-            clean_text = re.sub(r'\*\*(.+?)\*\*', r'\1', bullet_text)
-            pdf.set_font('Arial', 'B', 11)
+            clean_text = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', bullet_text), unicode_fonts)
+            pdf.set_font(font_family, 'B', 11)
             pdf.set_text_color(*CYAN)
-            pdf.cell(5, 6, chr(9679))  # filled circle
-            pdf.set_font('Arial', '', 11)
+            pdf.cell(5, 6, '-' if not unicode_fonts else chr(9679))
+            pdf.set_font(font_family, '', 11)
             pdf.set_text_color(*BODY_TEXT)
             pdf.multi_cell(0, 6, '  ' + clean_text)
             pdf.ln(1.5)
@@ -619,19 +804,19 @@ def generate_notes(class_num, subject, chapter):
             if not in_table:
                 # First row = header
                 pdf.set_fill_color(*DARK_CARD)
-                pdf.set_font('Arial', 'B', 10)
+                pdf.set_font(font_family, 'B', 10)
                 pdf.set_text_color(*GOLD)
                 for cell in cells:
-                    clean = re.sub(r'\*\*(.+?)\*\*', r'\1', cell)
+                    clean = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', cell), unicode_fonts)
                     pdf.cell(col_w, 8, clean, border=1, fill=True, align='C')
                 pdf.ln()
                 in_table = True
             else:
-                pdf.set_font('Arial', '', 10)
+                pdf.set_font(font_family, '', 10)
                 pdf.set_text_color(*BODY_TEXT)
                 pdf.set_fill_color(15, 18, 38)
                 for cell in cells:
-                    clean = re.sub(r'\*\*(.+?)\*\*', r'\1', cell)
+                    clean = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', cell), unicode_fonts)
                     pdf.cell(col_w, 7, clean, border=1, fill=True, align='C')
                 pdf.ln()
 
@@ -641,11 +826,59 @@ def generate_notes(class_num, subject, chapter):
 
         else:
             in_table = False
-            pdf.set_font('Arial', '', 11)
+            pdf.set_font(font_family, '', 11)
             pdf.set_text_color(*BODY_TEXT)
-            clean_text = re.sub(r'\*\*(.+?)\*\*', r'\1', stripped)
+            clean_text = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', stripped), unicode_fonts)
             pdf.multi_cell(0, 6, clean_text)
             pdf.ln(1.5)
+
+    # Append diagram image pages when image mode is selected.
+    if use_images and isinstance(slides_data, list):
+        diagram_slides = [s for s in slides_data if s.get('type') == 'diagram'][:10]
+        if diagram_slides:
+            new_content_page()
+            pdf.set_font(font_family, 'B', 18)
+            pdf.set_text_color(*GOLD)
+            pdf.multi_cell(0, 10, normalize_pdf_text("Diagram Reference Pages", unicode_fonts), align='C')
+            pdf.ln(3)
+
+        for idx, s in enumerate(diagram_slides, 1):
+            if pdf.get_y() > pdf.h - 120:
+                new_content_page()
+            title = normalize_pdf_text(str(s.get('title', f"Diagram {idx}")), unicode_fonts)
+            query = str(s.get('search_query', '') or f"labeled diagram of {title}")
+
+            pdf.set_font(font_family, 'B', 12)
+            pdf.set_text_color(*CYAN)
+            pdf.multi_cell(0, 7, normalize_pdf_text(f"{idx}. {title}", unicode_fonts))
+
+            img_stream = scrape_image(query)
+            if img_stream:
+                img_bytes = img_stream.getvalue()
+                tmp_name = f"_tmp_note_img_{idx}.png"
+                with open(tmp_name, 'wb') as f:
+                    f.write(img_bytes)
+                try:
+                    x = pdf.l_margin
+                    y = pdf.get_y() + 2
+                    w = min(160, pdf.w - pdf.l_margin - pdf.r_margin)
+                    pdf.image(tmp_name, x=x, y=y, w=w)
+                    pdf.set_y(y + 90)
+                except Exception:
+                    pdf.set_font(font_family, '', 10)
+                    pdf.set_text_color(*BULLET_COL)
+                    pdf.multi_cell(0, 6, normalize_pdf_text(f"[Could not render image for query: {query}]", unicode_fonts))
+                finally:
+                    try:
+                        os.remove(tmp_name)
+                    except Exception:
+                        pass
+            else:
+                pdf.set_font(font_family, '', 10)
+                pdf.set_text_color(*BULLET_COL)
+                pdf.multi_cell(0, 6, normalize_pdf_text(f"[No image found for query: {query}]", unicode_fonts))
+
+            pdf.ln(4)
 
     # --- Footer on last page ---
     pdf.ln(10)
@@ -654,9 +887,9 @@ def generate_notes(class_num, subject, chapter):
     pdf.set_line_width(0.3)
     pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
     pdf.ln(4)
-    pdf.set_font('Arial', 'I', 9)
+    pdf.set_font(font_family, 'I', 9)
     pdf.set_text_color(*BULLET_COL)
-    pdf.multi_cell(0, 5, "Generated by SkillRev AI  |  edu-slide-maker", align='C')
+    pdf.multi_cell(0, 5, normalize_pdf_text("Generated by SkillRev AI  |  edu-slide-maker", unicode_fonts), align='C')
 
     buf = BytesIO()
     buf.write(pdf.output())
@@ -708,7 +941,7 @@ if st.button("🚀 Generate Presentation", type="primary", use_container_width=T
             # --- PPT ---
             st.write("🤖 Generating 30-slide presentation...")
             try:
-                ppt_buf, ppt_filename = generate_ppt(class_num, subject, chapter, use_images)
+                ppt_buf, ppt_filename, slides_data = generate_ppt(class_num, subject, chapter, use_images)
             except Exception as e:
                 status.update(label="❌ PPT generation failed", state="error")
                 st.error(f"PPT Error: {e}")
@@ -721,7 +954,9 @@ if st.button("🚀 Generate Presentation", type="primary", use_container_width=T
             if include_notes:
                 st.write("📝 Generating study notes...")
                 try:
-                    notes_buf, notes_filename = generate_notes(class_num, subject, chapter)
+                    notes_buf, notes_filename = generate_notes(
+                        class_num, subject, chapter, use_images=use_images, slides_data=slides_data
+                    )
                 except Exception as e:
                     status.update(label="❌ Notes generation failed", state="error")
                     st.error(f"Notes Error: {e}")
