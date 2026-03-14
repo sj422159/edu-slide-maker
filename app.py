@@ -518,7 +518,7 @@ GEMINI_PROMPT_TEXT_ONLY = """You are an expert {subject} teacher. Create a detai
 Return a JSON array of exactly 25-50 slide objects. Each slide must have these keys:
 - "type": one of "title", "section", "content", "summary"
 - "title": slide heading
-- "body": array of 6-8 detailed, informative bullet point strings. Each bullet should be a complete explanation (15-25 words) that teaches the concept clearly. NOT needed for title/section slides.
+- "body": array of 6-8 detailed, informative bullet point strings. Each bullet should be a complete explanation (35 words) that teaches the concept clearly. NOT needed for title/section slides.
 - "section_number": integer, only for "section" type slides
 
 STRUCTURE RULES:
@@ -536,36 +536,223 @@ Return ONLY the JSON array, no other text."""
 # ==========================================
 # NOTES PROMPT
 # ==========================================
-NOTES_PROMPT = """You are an expert {subject} teacher. Write comprehensive, well-structured study notes on "{chapter}" for Class {class_num} students.
+NOTES_THEORY_PROMPT = """You are an expert {subject} teacher writing a COMPLETE, DETAILED study guide on "{chapter}" for Class {class_num} students.
 
-The notes should include:
-- Chapter overview
-- All key concepts with clear explanations
-- Important definitions
-- Diagrams described in text (e.g. "Diagram: ...")
-- Formulas and equations where applicable
-- Comparisons and differences in table format (use markdown tables)
-- Examples and solved problems where relevant
-- Key points to remember / exam tips
-- Summary at the end
+Write thorough theory notes in clean Markdown covering ALL of the following sections — do not skip any:
 
-Format the notes in clean Markdown with proper headings (#, ##, ###), bullet points, bold for key terms, and tables where useful.
-Make it detailed enough that a student can use these notes alone to study for exams.
+# {chapter} — Complete Study Guide
 
-The notes must represent the FULL chapter in depth, not a brief summary."""
+## 1. Chapter Overview
+(Write a 150-200 word introduction covering the scope, importance, and what will be studied in this chapter.)
 
-NOTES_PROMPT_WITH_IMAGES = """You are an expert {subject} teacher. Write comprehensive, full-chapter study notes on "{chapter}" for Class {class_num} students.
+## 2. Key Concepts & In-Depth Explanations
+(Explain EVERY core concept in this chapter in detail — at least 5-10 concepts. Use sub-headings (###) for each concept. Give real-life examples. Nothing should be left out.)
 
-Requirements:
-- Cover the complete chapter in depth so students can study from these notes alone.
-- Include chapter overview, all key concepts, definitions, formulas, solved examples, comparisons, and exam tips.
-- Include a section titled "## Diagram Guide" with at least 8 entries.
-- For each diagram entry use this exact format:
-    - Diagram Title: <short title>
-    - Search Query: <image search query for a labeled educational diagram>
-    - Why It Matters: <1-2 lines>
+## 3. Important Definitions & Glossary
+(Define ALL key terms in this chapter with bold term names and full explanations. Must have at least 15-20 definitions.)
 
-Return Markdown only."""
+## 4. Formulas, Laws & Equations
+(List every formula, law, rule, or equation. State what each symbol means. Derive where applicable.)
+
+## 5. Solved Examples & Worked Problems
+(At least 6-8 fully solved problems or application examples with step-by-step working.)
+
+## 6. Diagrams & Visual Concepts
+(Describe at least 6-8 important diagrams clearly. Say what each part shows and why it matters.)
+
+## 7. Comparison Tables
+(At least 4-5 markdown tables comparing related concepts, e.g. A vs B, Type 1 vs Type 2.)
+
+## 8. Important Facts, Dates & Statistics
+(List notable facts, figures, historical context, or statistics relevant to this chapter.)
+
+## 9. Quick Revision Bullets
+(Write 25-30 short, exam-ready bullet points covering the most important points in the chapter.)
+
+## 10. Exam Tips & Common Mistakes to Avoid
+(What examiners expect. Common marking errors students make. How to score full marks.)
+
+## 11. Chapter Summary
+(A concise 150-word paragraph summarising the entire chapter — useful for last-minute revision.)
+
+Rules:
+- Use **bold** for all key terms on first use.
+- Use markdown tables for all comparisons.
+- Do NOT truncate any section — be exhaustive.
+- Return Markdown only."""
+
+NOTES_THEORY_PROMPT_WITH_DIAGRAMS = """You are an expert {subject} teacher writing a COMPLETE, DETAILED study guide on "{chapter}" for Class {class_num} students.
+
+Write thorough theory notes in clean Markdown covering ALL of the following sections — do not skip any:
+
+# {chapter} — Complete Study Guide
+
+## 1. Chapter Overview
+(Write a 150-200 word introduction covering the scope, importance, and what will be studied in this chapter.)
+
+## 2. Key Concepts & In-Depth Explanations
+(Explain EVERY core concept in detail with sub-headings (###) for each concept. Give real-life examples.)
+
+## 3. Important Definitions & Glossary
+(Define ALL key terms with bold term names and full explanations. Must have at least 15-20 definitions.)
+
+## 4. Formulas, Laws & Equations
+(Every formula, law, rule, or equation with symbol meanings.)
+
+## 5. Solved Examples & Worked Problems
+(At least 6-8 fully worked problems with step-by-step solutions.)
+
+## 6. Diagram Guide
+(For each diagram write:
+- **Diagram:** <Title>
+- **Description:** What it shows in detail — label all parts.
+- **Key Insight:** Why it matters.
+List at least 8 diagrams.)
+
+## 7. Comparison Tables
+(At least 4-5 markdown tables comparing related concepts.)
+
+## 8. Important Facts, Dates & Statistics
+(Notable facts, figures, historical context, or statistics.)
+
+## 9. Quick Revision Bullets
+(25-30 short, exam-ready bullet points.)
+
+## 10. Exam Tips & Common Mistakes to Avoid
+(What examiners expect. Common student errors. How to score full marks.)
+
+## 11. Chapter Summary
+(A concise 150-word paragraph summarising the entire chapter.)
+
+Rules:
+- Use **bold** for all key terms on first use.
+- Use markdown tables for all comparisons.
+- Do NOT truncate any section — be exhaustive.
+- Return Markdown only."""
+
+NOTES_QUESTIONS_PROMPT = """You are an expert {subject} teacher. Generate a COMPLETE question bank for "{chapter}" for Class {class_num} students.
+
+Return clean Markdown with ALL of the following sections. Do NOT skip or shorten any section.
+
+---
+
+# Question Bank — {chapter}
+
+## Section A: Multiple Choice Questions (MCQs)
+(Write 20 MCQs. 4 options each labelled (a) (b) (c) (d). Mark the correct answer with reasoning.)
+
+Use this EXACT format for every question:
+
+**Q1.** Question text here
+(a) Option A  (b) Option B  (c) Option C  (d) Option D
+**Answer:** (x) — One-line explanation.
+
+---
+
+## Section B: Very Short Answer Questions (1 Mark)
+(Write 15 questions. Each answer should be 1-2 sentences.)
+
+Format:
+**Q1.** Question
+**Ans:** Answer
+
+---
+
+## Section C: Short Answer Questions (2–3 Marks)
+(Write 15 questions. Each answer should be 4-6 sentences with key terms.)
+
+Format:
+**Q1.** Question
+**Ans:** Detailed answer
+
+---
+
+## Section D: Long Answer / Essay Questions (5 Marks)
+(Write 10 questions. Each answer must be a thorough explanation with bullet points, sub-headings, or diagrams described in text. Examiner-ready quality.)
+
+Format:
+**Q1.** Question
+**Ans:**
+Full detailed answer here...
+
+---
+
+## Section E: Previous Year Questions (PYQs)
+(Write 20 PYQ-style questions based on actual board exam patterns. Include board name and year in brackets. Provide full model answers.)
+
+Format:
+**PYQ Q1.** [CBSE 2023 — 3 Marks] Question text
+**Ans:** Model answer
+
+---
+
+## Section F: Assertion–Reason Questions
+(Write 10 assertion-reason pairs. For each, provide the standard instruction:
+"Choose: (A) Both A and R are true and R is the correct explanation of A. (B) Both A and R are true but R is NOT the correct explanation. (C) A is true but R is false. (D) A is false but R is true."
+Then state the correct option with a brief reason.)
+
+Format:
+**Q1.**
+**Assertion (A):** Statement
+**Reason (R):** Statement
+**Answer:** Option (X) — explanation
+
+---
+
+## Section G: Case Study / Source-Based Questions
+(Write 4 case studies. Each case study is a short passage (3-5 sentences) followed by 4 sub-questions with answers.)
+
+Format:
+**Case Study 1:**
+Passage text here...
+**(i)** Question  **Ans:** Answer
+**(ii)** Question  **Ans:** Answer
+**(iii)** Question  **Ans:** Answer
+**(iv)** Question  **Ans:** Answer
+
+---
+
+## Section H: Fill in the Blanks
+(Write 20 fill-in-the-blank statements. Answers in brackets below each.)
+
+Format:
+**Q1.** The process of _______ occurs when...
+**Ans:** [keyword]
+
+---
+
+## Section I: True or False (with Justification)
+(Write 15 statements. State True or False and give a 1-sentence justification.)
+
+Format:
+**Q1.** Statement here.
+**Ans:** True/False — Justification.
+
+---
+
+## Section J: Match the Following
+(Write 3 matching exercises with Column A (5 items) and Column B (5 items). Provide answers.)
+
+---
+
+## Section K: One-Word / One-Line Answers
+(Write 15 questions where the answer is a single word or phrase.)
+
+---
+
+## Section L: Diagram-Based Questions
+(Write 8 questions that ask students to draw and label a diagram, or interpret a described diagram. Provide full model answers including what the diagram should show.)
+
+---
+
+Rules:
+- ALL answers must be exam-quality and complete. Never write "answer not provided".
+- Use the exact format specified for each section.
+- Return Markdown ONLY — no preamble, no explanation."""
+
+# Kept as aliases so both prompt names resolve.
+NOTES_PROMPT = NOTES_THEORY_PROMPT
+NOTES_PROMPT_WITH_IMAGES = NOTES_THEORY_PROMPT_WITH_DIAGRAMS
 
 # ==========================================
 # PPT GENERATION
@@ -640,11 +827,19 @@ def generate_ppt(class_num, subject, chapter, use_images):
     return buf, filename, slides_data
 
 def generate_notes(class_num, subject, chapter, use_images=False, slides_data=None):
-    prompt_tmpl = NOTES_PROMPT_WITH_IMAGES if use_images else NOTES_PROMPT
-    prompt = prompt_tmpl.format(
+    # --- Call 1: Theory Notes ---
+    theory_tmpl = NOTES_THEORY_PROMPT_WITH_DIAGRAMS if use_images else NOTES_THEORY_PROMPT
+    theory_text = gemini_generate_text(theory_tmpl.format(
         class_num=class_num, subject=subject, chapter=chapter
-    )
-    notes_text = gemini_generate_text(prompt)
+    ))
+
+    # --- Call 2: Question Bank ---
+    questions_text = gemini_generate_text(NOTES_QUESTIONS_PROMPT.format(
+        class_num=class_num, subject=subject, chapter=chapter
+    ))
+
+    # Combine both into a single markdown document
+    notes_text = theory_text.strip() + "\n\n---\n\n" + questions_text.strip()
     safe_name = re.sub(r'[^\w\s-]', '', chapter).strip().replace(' ', '_')
     filename = f"Class{class_num}_{subject}_{safe_name}_Notes.pdf"
 
@@ -705,7 +900,7 @@ def generate_notes(class_num, subject, chapter, use_images=False, slides_data=No
     pdf.set_font(font_family, 'I', 10)
     pdf.set_text_color(*BULLET_COL)
     pdf.set_y(pdf.h - 35)
-    pdf.multi_cell(0, 6, normalize_pdf_text("Study Notes  |  Generated by SkillRev AI", unicode_fonts), align='C')
+    pdf.multi_cell(0, 6, normalize_pdf_text("Complete Study Guide  |  Generated by SkillRev AI", unicode_fonts), align='C')
 
     # --- Content Pages ---
     def new_content_page():
@@ -781,6 +976,89 @@ def generate_notes(class_num, subject, chapter, use_images=False, slides_data=No
             pdf.set_line_width(0.5)
             pdf.line(pdf.w * 0.25, y, pdf.w * 0.75, y)
             pdf.ln(5)
+
+        elif stripped == '---':
+            # Horizontal section divider
+            pdf.ln(4)
+            y = pdf.get_y()
+            pdf.set_draw_color(*GOLD)
+            pdf.set_line_width(0.5)
+            pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
+            pdf.ln(5)
+
+        elif re.match(r'^\*\*(PYQ\s+)?Q\d+\.\*\*', stripped):
+            # Question line — gold bold label + question text
+            pdf.ln(3)
+            if pdf.get_y() > pdf.h - 35:
+                new_content_page()
+            # Strip bold markers and extract question number + body
+            raw = re.sub(r'\*\*(.+?)\*\*', r'\1', stripped)
+            pdf.set_x(pdf.l_margin)
+            pdf.set_font(font_family, 'B', 11)
+            pdf.set_text_color(*GOLD)
+
+            qnum_match = re.match(r'((PYQ\s+)?Q\d+\.)\s*(.*)', raw, re.DOTALL)
+            if qnum_match:
+                qnum = normalize_pdf_text(qnum_match.group(1), unicode_fonts)
+                qbody = normalize_pdf_text(qnum_match.group(3), unicode_fonts)
+                num_w = pdf.get_string_width(qnum + ' ') + 2
+                pdf.cell(num_w, 7, qnum)
+                pdf.set_font(font_family, '', 11)
+                pdf.set_text_color(*WHITE_TEXT)
+                pdf.multi_cell(0, 7, qbody)
+            else:
+                pdf.multi_cell(0, 7, normalize_pdf_text(raw, unicode_fonts))
+            pdf.ln(1)
+
+        elif re.match(r'^\([a-d]\)', stripped):
+            # MCQ option line — indented with cyan option letter
+            opt_match = re.match(r'^(\([a-d]\))\s*(.*)', stripped)
+            if opt_match:
+                letter = opt_match.group(1)
+                opt_text = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', opt_match.group(2)), unicode_fonts)
+                pdf.set_x(pdf.l_margin + 12)
+                pdf.set_font(font_family, 'B', 10)
+                pdf.set_text_color(*CYAN)
+                pdf.cell(10, 6, letter)
+                pdf.set_font(font_family, '', 10)
+                pdf.set_text_color(*BODY_TEXT)
+                pdf.multi_cell(0, 6, opt_text)
+            else:
+                pdf.set_x(pdf.l_margin + 12)
+                pdf.set_font(font_family, '', 10)
+                pdf.set_text_color(*BODY_TEXT)
+                pdf.multi_cell(0, 6, normalize_pdf_text(stripped, unicode_fonts))
+            pdf.ln(0.5)
+
+        elif re.match(r'^\*\*Ans(wer)?:', stripped, re.IGNORECASE):
+            # Answer line — teal card background
+            pdf.ln(1)
+            if pdf.get_y() > pdf.h - 30:
+                new_content_page()
+            ans_raw = re.sub(r'^\*\*Ans(wer)?:\*\*\s*', '', stripped, flags=re.IGNORECASE)
+            clean_ans = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', ans_raw), unicode_fonts)
+            y = pdf.get_y()
+            card_h = 8
+            # Light teal card behind answer
+            pdf.set_fill_color(0, 60, 70)
+            pdf.rect(pdf.l_margin, y, pdf.w - pdf.l_margin - pdf.r_margin, card_h, 'F')
+            pdf.set_xy(pdf.l_margin + 3, y + 0.5)
+            pdf.set_font(font_family, 'B', 10)
+            pdf.set_text_color(*CYAN)
+            pdf.cell(16, 7, 'Ans:')
+            pdf.set_font(font_family, '', 10)
+            pdf.set_text_color(200, 240, 240)
+            pdf.multi_cell(0, 7, clean_ans)
+            pdf.ln(2)
+
+        elif re.match(r'^\*\*\(i+v?|^\*\*\(vi*\)', stripped):
+            # Sub-question (i) (ii) (iii) style — indented
+            raw = normalize_pdf_text(re.sub(r'\*\*(.+?)\*\*', r'\1', stripped), unicode_fonts)
+            pdf.set_x(pdf.l_margin + 8)
+            pdf.set_font(font_family, 'B', 10)
+            pdf.set_text_color(*CYAN)
+            pdf.multi_cell(0, 6, raw)
+            pdf.ln(0.5)
 
         elif stripped.startswith('- ') or stripped.startswith('* '):
             # Bullet point with cyan dot
