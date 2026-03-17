@@ -40,8 +40,10 @@ LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
 # GEMINI HELPERS
 # ==========================================
 GEMINI_MODELS = [
-    "gemini-2.5-flash",
+"gemini-flash-latest",
+   
     "gemini-3-flash-preview",
+     "gemini-2.5-flash",
     "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
