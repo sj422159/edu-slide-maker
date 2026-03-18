@@ -1195,8 +1195,8 @@ if os.path.exists(LOGO_PATH):
     with col2:
         st.image(LOGO_PATH, width=200)
 
-st.title("📚 AI Presentation Maker")
-st.markdown("Generate professional 30-slide presentations + study notes powered by AI")
+st.title("📚 AI Education Generator")
+st.markdown("Generate professional 30-slide presentations OR comprehensive study notes powered by AI")
 
 st.divider()
 
@@ -1206,45 +1206,64 @@ with col1:
     subject = st.text_input("Subject", placeholder="e.g. Biology")
 with col2:
     chapter = st.text_input("Chapter", placeholder="e.g. Human Life Processes")
+    output_types = st.multiselect(
+        "What would you like to generate?", 
+        ["Presentation (PPTX)", "Study Notes (PDF)"],
+        default=["Presentation (PPTX)"]
+    )
     use_images = st.checkbox("Include images/diagrams", value=False)
-    include_notes = st.checkbox("Generate study notes (PDF)", value=False)
 
 st.divider()
 
-if st.button("🚀 Generate Presentation", type="primary", use_container_width=True):
+button_label = "🚀 Generate Content"
+if st.button(button_label, type="primary", use_container_width=True):
     if not class_num or not subject or not chapter:
         st.error("Please fill in all fields.")
+    elif not output_types:
+        st.error("Please select at least one output type to generate.")
     elif not API_KEY:
         st.error("GEMINI_API_KEY environment variable not set.")
     else:
         with st.status("Generating your content...", expanded=True) as status:
-            # --- PPT ---
-            st.write("🤖 Generating 30-slide presentation...")
-            try:
-                ppt_buf, ppt_filename, slides_data = generate_ppt(class_num, subject, chapter, use_images)
-            except Exception as e:
-                status.update(label="❌ PPT generation failed", state="error")
-                st.error(f"PPT Error: {e}")
-                st.stop()
-
-            notes_buf = None
-            notes_filename = None
-
-            # --- Notes (only if checkbox is checked) ---
-            if include_notes:
+            ppt_buf, ppt_filename, slides_data = None, None, None
+            notes_buf, notes_filename = None, None
+            
+            if "Presentation (PPTX)" in output_types:
+                st.write("🤖 Generating 30-slide presentation...")
+                try:
+                    ppt_buf, ppt_filename, slides_data = generate_ppt(class_num, subject, chapter, use_images)
+                except Exception as e:
+                    status.update(label="❌ PPT generation failed", state="error")
+                    st.error(f"PPT Error: {e}")
+                    st.stop()
+                    
+            if "Study Notes (PDF)" in output_types:
                 st.write("📝 Generating study notes...")
                 try:
+                    slides_data_for_notes = slides_data
+                    if use_images and slides_data_for_notes is None:
+                        st.write("🤖 Finding relevant diagrams...")
+                        prompt = GEMINI_PROMPT_TEMPLATE.format(
+                            class_num=class_num, subject=subject, chapter=chapter
+                        )
+                        try:
+                            response = gemini_generate(prompt)
+                            parsed_json = parse_json_response(response.text)
+                            slides_data_for_notes = normalize_slides_data(parsed_json, class_num, subject, chapter, use_images=True)
+                        except Exception as ignore_err:
+                            pass
+
                     notes_buf, notes_filename = generate_notes(
-                        class_num, subject, chapter, use_images=use_images, slides_data=slides_data
+                        class_num, subject, chapter, use_images=use_images, slides_data=slides_data_for_notes
                     )
                 except Exception as e:
                     status.update(label="❌ Notes generation failed", state="error")
                     st.error(f"Notes Error: {e}")
                     st.stop()
-
-            status.update(label="✅ Everything ready!", state="complete")
-
-        if include_notes and notes_buf:
+                    
+            status.update(label="✅ Content ready!", state="complete")
+        
+        if "Presentation (PPTX)" in output_types and "Study Notes (PDF)" in output_types:
             st.success("Your presentation and notes are ready!")
 
             zip_buf = BytesIO()
@@ -1257,19 +1276,27 @@ if st.button("🚀 Generate Presentation", type="primary", use_container_width=T
             zip_name = f"Class{class_num}_{subject}_{safe_name}.zip"
 
             st.download_button(
-                label="📥 Download Presentation & Notes",
+                label="📥 Download Presentation & Notes (ZIP)",
                 data=zip_buf,
                 file_name=zip_name,
                 mime="application/zip",
                 use_container_width=True
             )
-        else:
+        elif "Presentation (PPTX)" in output_types:
             st.success("Your presentation is ready!")
-
             st.download_button(
                 label="📥 Download Presentation",
                 data=ppt_buf,
                 file_name=ppt_filename,
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True
+            )
+        elif "Study Notes (PDF)" in output_types:
+            st.success("Your study notes are ready!")
+            st.download_button(
+                label="📥 Download Notes",
+                data=notes_buf,
+                file_name=notes_filename,
+                mime="application/pdf",
                 use_container_width=True
             )
