@@ -231,11 +231,11 @@ def gemini_generate(prompt, response_mime='application/json'):
                 )
             except Exception as e:
                 err = str(e)
-                if '429' in err or 'RESOURCE_EXHAUSTED' in err:
+                if '429' in err or 'RESOURCE_EXHAUSTED' in err or '503' in err or 'UNAVAILABLE' in err:
                     if attempt < 2:
                         time.sleep(15 * (attempt + 1))
                         continue
-                    errors.append(f"{model}: rate limited")
+                    errors.append(f"{model}: rate limited/unavailable")
                     break  # move to next model
                 else:
                     raise
@@ -254,11 +254,11 @@ def gemini_generate_text(prompt):
                 return resp.text
             except Exception as e:
                 err = str(e)
-                if '429' in err or 'RESOURCE_EXHAUSTED' in err:
+                if '429' in err or 'RESOURCE_EXHAUSTED' in err or '503' in err or 'UNAVAILABLE' in err:
                     if attempt < 2:
                         time.sleep(15 * (attempt + 1))
                         continue
-                    errors.append(f"{model}: rate limited")
+                    errors.append(f"{model}: rate limited/unavailable")
                     break
                 else:
                     raise
