@@ -876,9 +876,10 @@ def generate_notes(class_num, subject, chapter, use_images=False, slides_data=No
                 self.set_font(font_family, 'B', 8)
                 self.set_text_color(*CYAN)
                 self.set_xy(10, 4)
-                self.cell(0, 6, normalize_pdf_text(f"Class {class_num}  |  {subject}  |  {chapter}", unicode_fonts), align='L')
+                # Align text to right to make room for logo on left
+                self.cell(0, 6, normalize_pdf_text(f"Class {class_num}  |  {subject}  |  {chapter}", unicode_fonts), align='R')
                 if os.path.exists(LOGO_PATH):
-                    self.image(LOGO_PATH, x=self.w - 22, y=2, h=10)
+                    self.image(LOGO_PATH, x=10, y=2, h=10)
                 self.set_draw_color(*GOLD)
                 self.set_line_width(0.4)
                 self.line(10, 14, self.w - 10, 14)
@@ -903,9 +904,9 @@ def generate_notes(class_num, subject, chapter, use_images=False, slides_data=No
     pdf.set_fill_color(*NAVY)
     pdf.rect(0, 0, pdf.w, pdf.h, 'F')
 
-    # Logo on cover (top-right)
+    # Logo on cover (top-left)
     if os.path.exists(LOGO_PATH):
-        pdf.image(LOGO_PATH, x=pdf.w - 45, y=10, w=30)
+        pdf.image(LOGO_PATH, x=15, y=10, w=30)
 
     # Gold accent line
     pdf.set_draw_color(*GOLD)
