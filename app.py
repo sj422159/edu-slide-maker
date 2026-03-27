@@ -1316,17 +1316,14 @@ if st.button(button_label, type="primary", use_container_width=True):
 
             zip_buf = BytesIO()
             with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr(ppt_filename, ppt_buf.getvalue())
-                zf.writestr(notes_filename, notes_buf.getvalue())
+                zf.writestr("PPT.pptx", ppt_buf.getvalue())
+                zf.writestr("Notes.pdf", notes_buf.getvalue())
             zip_buf.seek(0)
-
-            safe_name = re.sub(r'[^\w\s-]', '', chapter).strip().replace(' ', '_')
-            zip_name = f"Class{class_num}_{subject}_{safe_name}.zip"
 
             st.download_button(
                 label="📥 Download Presentation & Notes (ZIP)",
                 data=zip_buf,
-                file_name=zip_name,
+                file_name="PPT_and_Notes.zip",
                 mime="application/zip",
                 use_container_width=True
             )
@@ -1335,7 +1332,7 @@ if st.button(button_label, type="primary", use_container_width=True):
             st.download_button(
                 label="📥 Download Presentation",
                 data=ppt_buf,
-                file_name=ppt_filename,
+                file_name="PPT.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 use_container_width=True
             )
@@ -1344,7 +1341,7 @@ if st.button(button_label, type="primary", use_container_width=True):
             st.download_button(
                 label="📥 Download Notes",
                 data=notes_buf,
-                file_name=notes_filename,
+                file_name="Notes.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
