@@ -214,6 +214,43 @@ def normalize_pdf_text(text, unicode_fonts):
     cleaned = cleaned.replace('“', '"').replace('”', '"')
     cleaned = cleaned.replace('’', "'").replace('•', '-')
     cleaned = cleaned.replace('▸', '-').replace('✦', '*')
+    
+    # Math/LaTeX cleanup for FPDF compatibility
+    cleaned = cleaned.replace('$', '')
+    cleaned = cleaned.replace('\\implies', '=>')
+    cleaned = cleaned.replace('\\sqrt', '√')
+    cleaned = cleaned.replace('\\circ', '°')
+    cleaned = cleaned.replace('\\alpha', 'α')
+    cleaned = cleaned.replace('\\beta', 'β')
+    cleaned = cleaned.replace('\\theta', 'θ')
+    cleaned = cleaned.replace('\\pi', 'π')
+    cleaned = cleaned.replace('\\mu', 'μ')
+    cleaned = cleaned.replace('\\sigma', 'σ')
+    cleaned = cleaned.replace('\\omega', 'ω')
+    cleaned = cleaned.replace('\\Delta', 'Δ')
+    cleaned = cleaned.replace('\\times', '×')
+    cleaned = cleaned.replace('\\div', '÷')
+    cleaned = cleaned.replace('\\pm', '±')
+    cleaned = cleaned.replace('\\neq', '≠')
+    cleaned = cleaned.replace('\\leq', '≤')
+    cleaned = cleaned.replace('\\geq', '≥')
+    cleaned = cleaned.replace('\\approx', '≈')
+    cleaned = cleaned.replace('\\sin', 'sin')
+    cleaned = cleaned.replace('\\cos', 'cos')
+    cleaned = cleaned.replace('\\tan', 'tan')
+    cleaned = cleaned.replace('\\cot', 'cot')
+    cleaned = cleaned.replace('\\sec', 'sec')
+    cleaned = cleaned.replace('\\csc', 'csc')
+    cleaned = cleaned.replace('\\log', 'log')
+    cleaned = cleaned.replace('\\ln', 'ln')
+    
+    # Handle fractions simple form
+    cleaned = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'(\1)/(\2)', cleaned)
+    
+    # Clean up excess backslashes and brackets
+    cleaned = cleaned.replace('{', '(').replace('}', ')')
+    cleaned = cleaned.replace('\\', '')
+    
     if not unicode_fonts:
         cleaned = cleaned.encode('latin-1', 'ignore').decode('latin-1')
     return cleaned
