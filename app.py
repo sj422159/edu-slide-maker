@@ -1323,7 +1323,7 @@ if st.button(button_label, type="primary", use_container_width=True):
             st.download_button(
                 label="📥 Download Presentation & Notes (ZIP)",
                 data=zip_buf,
-                file_name=f"{subject}.zip",
+                file_name=f"{chapter}.zip",
                 mime="application/zip",
                 use_container_width=True
             )
