@@ -6,3 +6,4 @@ requests
 fpdf2
 mistralai
 python-dotenv
+pythoncom
