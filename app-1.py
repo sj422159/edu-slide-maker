@@ -2,11 +2,6 @@ import streamlit as st
 import os, json, requests, re, time, zipfile
 import ast
 from urllib.parse import quote_plus
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
 from google import genai
 from google.genai import types
 from pptx import Presentation
@@ -20,12 +15,6 @@ from fpdf import FPDF
 import tempfile
 import pythoncom
 import win32com.client
-
-try:
-    from html_generator import generate_html_from_outline
-except Exception as e:
-    print(f"⚠️ Warning: HTML generator import failed: {type(e).__name__}: {e}")
-    generate_html_from_outline = None
 
 # ==========================================
 # CONFIGURATION
@@ -61,8 +50,6 @@ LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
 # GEMINI HELPERS
 # ==========================================
 GEMINI_MODELS = [
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
@@ -311,7 +298,7 @@ def generate_image_with_gemini(query):
         if response and hasattr(response, 'generated_images') and response.generated_images:
             img_obj = response.generated_images[0]
             
-            # Try to get the image URL (could be display_url or gcs_uri)
+            # Try to get the image URL
             img_url = None
             if hasattr(img_obj, 'image'):
                 if hasattr(img_obj.image, 'display_url'):
@@ -372,10 +359,8 @@ def scrape_image(query):
                         stream = BytesIO(r.content)
                         try:
                             img = Image.open(stream)
-                            # Verify it's a valid image
                             img.load()
                             
-                            # Convert if needed
                             if img.format not in ('JPEG', 'PNG'):
                                 buf = BytesIO()
                                 if img.mode != 'RGB':
@@ -636,16 +621,15 @@ def build_summary_slide(prs, title, points):
     add_logo(slide)
 
 
-def build_thank_you_slide(prs, class_num, subject, title):
+def build_thank_you_slide(prs, class_num, subject, chapter):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     set_slide_bg(slide, HEADING_BG)
     add_textbox(slide, Inches(1), Inches(2.4), Inches(11.33), Inches(1.6),
                 "Thank You!", font_size=52, color=HEADING_TEXT, bold=True,
                 alignment=PP_ALIGN.CENTER, font_name=FONT_TITLE)
     add_line(slide, Inches(4), Inches(4.2), Inches(5.33), ACCENT_GOLD, 4)
-    footer_text = title if title else (f"Class {class_num}  |  {subject}  |  Presentation" if class_num else "Thank You for Learning")
     add_textbox(slide, Inches(1), Inches(4.5), Inches(11.33), Inches(0.8),
-                footer_text,
+                f"Class {class_num}  |  {subject}  |  {chapter}",
                 font_size=18, color=HEADING_SUB, alignment=PP_ALIGN.CENTER)
     add_logo(slide)
 
@@ -933,243 +917,6 @@ Rules:
 
 NOTES_PROMPT = NOTES_THEORY_PROMPT
 NOTES_PROMPT_WITH_IMAGES = NOTES_THEORY_PROMPT_WITH_DIAGRAMS
-
-# ==========================================
-# PPT GENERATION FROM OUTLINE
-# ==========================================
-def parse_outline_to_slides(outline_text):
-    """Parse user outline into slide structure."""
-    slides = []
-    lines = outline_text.strip().split('\n')
-    current_slide = None
-    
-    for line in lines:
-        line = line.rstrip()
-        if line.startswith('# '):
-            # New slide
-            if current_slide and current_slide['title']:
-                slides.append(current_slide)
-            current_slide = {
-                'title': line[2:].strip(),
-                'bullets': [],
-                'has_visual': False
-            }
-        elif line.startswith('## '):
-            # Section slide
-            if current_slide and current_slide['title']:
-                slides.append(current_slide)
-            current_slide = {
-                'title': line[3:].strip(),
-                'is_section': True,
-                'bullets': [],
-                'has_visual': False
-            }
-        elif line.startswith('- ') or line.startswith('* '):
-            if current_slide:
-                bullet_text = line[2:].strip()
-                current_slide['bullets'].append(bullet_text)
-                if '[VISUAL]' in bullet_text or '[DIAGRAM]' in bullet_text:
-                    current_slide['has_visual'] = True
-    
-    if current_slide and current_slide['title']:
-        slides.append(current_slide)
-    
-    return slides
-
-
-def expand_slides_with_gemini(slides, presentation_title, use_images):
-    """Expand outline slides with detailed content using Gemini."""
-    prompt = f"""You are an expert educator creating a comprehensive presentation from a user-provided outline.
-
-The user has provided this presentation outline with {len(slides)} slides:
-
-{json.dumps(slides, indent=2)}
-
-Your task:
-1. Expand each slide's bullets with detailed, educational content
-2. For slides marked with [VISUAL] or [DIAGRAM], provide a search_query for finding relevant images
-3. Maintain the original slide titles and structure
-4. Create clear, complete bullet points (3-5 sentences each) suitable for classroom use
-5. Mark important terms in CAPS
-6. If there are fewer than 5 slides, generate additional related content slides between existing ones
-
-Return a JSON array of expanded slide objects with these keys:
-- "title": slide title (from outline or enhanced)
-- "body": array of 5-8 detailed bullet points
-- "search_query": image search query if visual needed, empty string otherwise
-- "type": one of "title", "content", or "diagram"
-
-Ensure the presentation flows logically and covers all outlined topics thoroughly.
-
-Return ONLY the JSON array, no markdown."""
-
-    response = gemini_generate(prompt)
-    try:
-        expanded = parse_json_response(response.text)
-    except ValueError:
-        try:
-            expanded = repair_slides_json(response.text)
-        except Exception as e:
-            raise ValueError(f"Could not parse expanded slides. Error: {e}")
-    
-    return expanded
-
-
-def generate_ppt_from_outline(outline_text, presentation_title, use_images):
-    """Generate PPT from user-provided outline."""
-    # Parse outline
-    slides = parse_outline_to_slides(outline_text)
-    
-    if not slides:
-        raise ValueError("No valid slides found in outline. Ensure slides start with '# ' or '## '")
-    
-    # Expand with Gemini
-    expanded_slides = expand_slides_with_gemini(slides, presentation_title, use_images)
-    
-    # Normalize
-    normalized = []
-    for i, slide in enumerate(expanded_slides):
-        s_type = str(slide.get('type', 'content')).strip().lower()
-        if s_type not in ('title', 'section', 'content', 'diagram', 'summary'):
-            # If has search query and images enabled, mark as diagram
-            if use_images and slide.get('search_query', '').strip():
-                s_type = 'diagram'
-            else:
-                s_type = 'content'
-        
-        title = str(slide.get('title', f"Slide {i+1}")).strip()
-        body = slide.get('body', [])
-        if isinstance(body, str):
-            body = [b.strip() for b in re.split(r'[\n\r]+', body) if b.strip()]
-        elif not isinstance(body, list):
-            body = []
-        body = [str(b).strip() for b in body if str(b).strip()]
-        
-        search_query = str(slide.get('search_query', '') or '').strip()
-        
-        if not body and s_type in ('content', 'diagram', 'summary'):
-            body = [f"Key points about {title}"]
-        
-        if s_type == 'diagram' and not search_query:
-            search_query = f"diagram of {title}"
-        
-        normalized.append({
-            'type': s_type,
-            'title': title,
-            'body': body,
-            'search_query': search_query,
-            'section_number': None,
-        })
-    
-    # Add title slide if not present
-    if not normalized or normalized[0]['type'] != 'title':
-        normalized.insert(0, {
-            'type': 'title',
-            'title': presentation_title,
-            'body': ["Comprehensive Learning Presentation"],
-            'search_query': '',
-            'section_number': None,
-        })
-    
-    # Build presentation
-    prs = Presentation()
-    prs.slide_width, prs.slide_height = SLIDE_W, SLIDE_H
-    
-    for data in normalized:
-        slide_type = data.get('type', 'content')
-        title = data.get('title', '')
-        body = data.get('body', []) or [f"Key points about {title}"]
-        query = data.get('search_query', '')
-        
-        if slide_type == 'title':
-            subtitle = body[0] if body else "Comprehensive Learning Presentation"
-            build_title_slide(prs, title, subtitle)
-        elif slide_type == 'section':
-            build_section_slide(prs, None, title)
-        elif slide_type == 'diagram':
-            if use_images:
-                build_diagram_slide(prs, title, body, query)
-            else:
-                build_content_slide(prs, title, body)
-        elif slide_type == 'summary':
-            build_summary_slide(prs, title, body if isinstance(body, list) else [body])
-        else:
-            build_content_slide(prs, title, body)
-    
-    build_thank_you_slide(prs, "", "", presentation_title)
-    
-    buf = BytesIO()
-    prs.save(buf)
-    buf.seek(0)
-    safe_name = re.sub(r'[^\w\s-]', '', presentation_title).strip().replace(' ', '_')
-    return buf, f"{safe_name}_Presentation.pptx", normalized
-
-
-def generate_notes_from_outline(outline_text, presentation_title, use_images=False, slides_data=None):
-    """Generate notes from outline."""
-    prompt = f"""You are an expert educator creating comprehensive study notes from this presentation outline:
-
-{outline_text}
-
-Create detailed, exam-ready study notes in Markdown format covering:
-
-# {presentation_title} — Complete Study Guide
-
-## 1. Overview
-(150-200 words introducing the topic)
-
-## 2. Key Concepts & Detailed Explanations
-(Use ### sub-headings. Cover all concepts from the outline with examples.)
-
-## 3. Important Definitions & Glossary
-(Define at least 15 key terms)
-
-## 4. Summary of Key Points
-(Bullet list of main takeaways)
-
-## 5. Exam Preparation
-(Common questions, exam tips, memory aids)
-
----
-
-## QUESTION BANK
-
-### Section A: Multiple Choice Questions (MCQ)
-(20 questions with 4 options each and answers)
-
-### Section B: Very Short Answer (1 Mark)
-(20 questions)
-
-### Section C: Short Answer (2-3 Marks)
-(15 questions)
-
-### Section D: Long Answer (5 Marks)
-(10 questions)
-
----
-
-Ensure comprehensive coverage of all topics in the outline. Return Markdown ONLY."""
-
-    notes_text = gemini_generate_text(prompt)
-    
-    # Create PDF from notes
-    safe_name = re.sub(r'[^\w\s-]', '', presentation_title).strip().replace(' ', '_')
-    filename = f"{safe_name}_StudyNotes.pdf"
-    
-    pdf = FPDF(format='A4', unit='mm')
-    pdf.add_page()
-    pdf.set_font('Helvetica', '', 11)
-    
-    for line in notes_text.split('\n'):
-        if line.strip():
-            pdf.multi_cell(0, 5, line[:100])
-    
-    buf = BytesIO()
-    buf.write(pdf.output())
-    buf.seek(0)
-    
-    return buf, filename
-
 
 # ==========================================
 # PPT GENERATION
@@ -1625,54 +1372,24 @@ st.markdown(
 )
 st.divider()
 
-st.markdown("### 📋 Enter Your Presentation Outline")
-st.markdown(
-    "Provide a slide-by-slide outline (up to 60 slides). Each slide should have:\n"
-    "- A **title** (line starting with `#`)\n"
-    "- **Bullet points** for content\n"
-    "- Use `[VISUAL]` or `[DIAGRAM]` in bullet points to mark visual representations"
-)
-
-outline_text = st.text_area(
-    "Paste your outline here:",
-    placeholder="""# Slide 1: Introduction
-- Key point 1
-- Key point 2
-- [VISUAL: Diagram showing concept]
-
-# Slide 2: Main Content
-- Point A
-- Point B
-- Point C
-- [DIAGRAM: Compare with previous topic]
-
-# Slide 3: Summary
-- Recap point 1
-- Recap point 2""",
-    height=350
-)
-
 col1, col2 = st.columns(2)
 with col1:
-    presentation_title = st.text_input("Presentation Title", placeholder="e.g. Human Life Processes")
+    class_num = st.text_input("Class", placeholder="e.g. 10")
+    subject   = st.text_input("Subject", placeholder="e.g. Biology")
 with col2:
+    chapter   = st.text_input("Chapter", placeholder="e.g. Human Life Processes")
     output_types = st.multiselect(
         "What would you like to generate?",
-        ["Presentation (PPTX)", "Interactive HTML", "Study Notes (PDF)"],
-        default=["Presentation (PPTX)", "Interactive HTML"]
+        ["Presentation (PPTX)", "Study Notes (PDF)"],
+        default=["Presentation (PPTX)", "Study Notes (PDF)"]
     )
-
-use_images = st.checkbox("Include images / diagrams", value=False)
-include_quiz = st.checkbox("Include interactive quiz in HTML", value=True) if "Interactive HTML" in output_types else False
-elaborate_content = st.checkbox("Elaborate on bullet points (generate detailed content)", value=True)
+    use_images = st.checkbox("Include images / diagrams", value=False)
 
 st.divider()
 
 if st.button("🚀 Generate Content", type="primary", use_container_width=True):
-    if not outline_text or not outline_text.strip():
-        st.error("Please paste your presentation outline.")
-    elif not presentation_title:
-        st.error("Please enter a presentation title.")
+    if not class_num or not subject or not chapter:
+        st.error("Please fill in all fields.")
     elif not output_types:
         st.error("Please select at least one output type.")
     elif not API_KEY:
@@ -1680,41 +1397,36 @@ if st.button("🚀 Generate Content", type="primary", use_container_width=True):
     else:
         with st.status("Generating your content… this may take a few minutes.", expanded=True) as status:
             ppt_buf = ppt_filename = slides_data = None
-            html_buf = html_filename = None
             notes_buf = notes_filename = None
 
             if "Presentation (PPTX)" in output_types:
-                st.write("🤖 Processing outline and expanding content…")
+                st.write("🤖 Building 80–120 slide presentation…")
                 try:
-                    ppt_buf, ppt_filename, slides_data = generate_ppt_from_outline(
-                        outline_text, presentation_title, use_images)
+                    ppt_buf, ppt_filename, slides_data = generate_ppt(
+                        class_num, subject, chapter, use_images)
                 except Exception as e:
                     status.update(label="❌ Presentation generation failed", state="error")
                     st.error(f"PPT Error: {e}")
                     st.stop()
 
-            if "Interactive HTML" in output_types:
-                st.write("🌐 Generating interactive HTML presentation…")
-                try:
-                    if generate_html_from_outline:
-                        html_buf, html_filename = generate_html_from_outline(
-                            outline_text, presentation_title, include_quiz=include_quiz, elaborate=elaborate_content)
-                        st.success(f"✅ HTML generated: {html_filename}")
-                    else:
-                        st.warning("⚠️ HTML generation module not available - please check dependencies")
-                except Exception as e:
-                    st.error(f"❌ HTML Error: {type(e).__name__}: {e}")
-                    import traceback
-                    st.write("Debug traceback:")
-                    st.code(traceback.format_exc())
-
             if "Study Notes (PDF)" in output_types:
                 st.write("📝 Generating study notes + question bank…")
                 try:
-                    notes_buf, notes_filename = generate_notes_from_outline(
-                        outline_text, presentation_title,
+                    slides_data_for_notes = slides_data
+                    if use_images and slides_data_for_notes is None:
+                        st.write("🔍 Finding diagram queries…")
+                        try:
+                            resp = gemini_generate(GEMINI_PROMPT_TEMPLATE.format(
+                                class_num=class_num, subject=subject, chapter=chapter))
+                            parsed = parse_json_response(resp.text)
+                            slides_data_for_notes = normalize_slides_data(
+                                parsed, class_num, subject, chapter, use_images=True)
+                        except Exception:
+                            pass
+                    notes_buf, notes_filename = generate_notes(
+                        class_num, subject, chapter,
                         use_images=use_images,
-                        slides_data=slides_data)
+                        slides_data=slides_data_for_notes)
                 except Exception as e:
                     status.update(label="❌ Notes generation failed", state="error")
                     st.error(f"Notes Error: {e}")
@@ -1728,63 +1440,45 @@ if st.button("🚀 Generate Content", type="primary", use_container_width=True):
             with st.spinner("Converting Presentation to PDF..."):
                 ppt_pdf_buf = convert_pptx_to_pdf(ppt_buf)
 
-        if ppt_buf or html_buf or notes_buf:
-            # Build output zip if multiple files
-            if (ppt_buf and notes_buf) or (ppt_buf and html_buf) or (html_buf and notes_buf):
-                st.success("Your content is ready for download!")
-                zip_buf = BytesIO()
-                with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                    if ppt_buf:
-                        zf.writestr("Presentation.pptx", ppt_buf.getvalue())
-                    if ppt_pdf_buf:
-                        zf.writestr("Presentation.pdf", ppt_pdf_buf.getvalue())
-                    if html_buf:
-                        zf.writestr(html_filename if html_filename else "Presentation.html", html_buf.getvalue())
-                    if notes_buf:
-                        zf.writestr("StudyNotes.pdf", notes_buf.getvalue())
-                zip_buf.seek(0)
-                st.download_button(
-                    "📥 Download All Files (ZIP)",
-                    data=zip_buf,
-                    file_name=f"{presentation_title}.zip",
-                    mime="application/zip",
-                    use_container_width=True
-                )
-                st.divider()
-
-            # Individual download buttons
-            if ppt_buf:
-                st.download_button(
-                    "📊 Download Presentation (PPTX)",
-                    data=ppt_buf,
-                    file_name=ppt_filename,
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    use_container_width=True
-                )
+        if ppt_buf and notes_buf:
+            st.success("Your presentation and study notes are ready!")
+            zip_buf = BytesIO()
+            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("Presentation.pptx", ppt_buf.getvalue())
                 if ppt_pdf_buf:
-                    st.download_button(
-                        "📄 Download Presentation (PDF)",
-                        data=ppt_pdf_buf,
-                        file_name=ppt_filename.replace('.pptx', '.pdf'),
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-
-            if html_buf:
+                    zf.writestr("Presentation.pdf", ppt_pdf_buf.getvalue())
+                zf.writestr("StudyNotes.pdf",    notes_buf.getvalue())
+            zip_buf.seek(0)
+            st.download_button(
+                "📥 Download Presentation + Notes (ZIP)",
+                data=zip_buf,
+                file_name=f"{chapter}.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+        elif ppt_buf:
+            st.success("Your presentation is ready!")
+            st.download_button(
+                "📥 Download Presentation (PPTX)",
+                data=ppt_buf,
+                file_name=ppt_filename,
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                use_container_width=True
+            )
+            if ppt_pdf_buf:
                 st.download_button(
-                    "🌐 Download Interactive HTML",
-                    data=html_buf,
-                    file_name=html_filename if html_filename else "Presentation.html",
-                    mime="text/html",
-                    use_container_width=True
-                )
-                st.info("💡 Open the HTML file in any web browser. Use arrow keys or buttons to navigate slides. Complete the quiz for instant feedback!")
-
-            if notes_buf:
-                st.download_button(
-                    "📚 Download Study Notes (PDF)",
-                    data=notes_buf,
-                    file_name=notes_filename,
+                    "📥 Download Presentation (PDF)",
+                    data=ppt_pdf_buf,
+                    file_name=ppt_filename.replace('.pptx', '.pdf'),
                     mime="application/pdf",
                     use_container_width=True
                 )
+        elif notes_buf:
+            st.success("Your study notes are ready!")
+            st.download_button(
+                "📥 Download Study Notes (PDF)",
+                data=notes_buf,
+                file_name=notes_filename,
+                mime="application/pdf",
+                use_container_width=True
+            )

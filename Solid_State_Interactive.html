@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solid State - Interactive Presentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0a1950 0%, #1a2a6f 100%);
+            color: #ffc43d;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .header .subtitle {
+            font-size: 1.1em;
+            color: #c8d2e1;
+        }
+        
+        .content {
+            padding: 40px;
+            min-height: 500px;
+        }
+        
+        .slide {
+            display: none;
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        .slide.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .slide h2 {
+            color: #0a1950;
+            font-size: 2em;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #ffc43d;
+            padding-bottom: 15px;
+        }
+        
+        .slide-number {
+            color: #999;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        
+        .slide ul {
+            margin-left: 30px;
+        }
+        
+        .slide li {
+            color: #333;
+            font-size: 1.1em;
+            line-height: 1.8;
+            margin-bottom: 15px;
+            list-style: none;
+            position: relative;
+            padding-left: 25px;
+        }
+        
+        .slide li:before {
+            content: "▸";
+            position: absolute;
+            left: 0;
+            color: #0a1950;
+            font-size: 1.3em;
+        }
+        
+        .visual-note {
+            background: #f0f4ff;
+            border-left: 4px solid #ffc43d;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            font-style: italic;
+            color: #666;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            padding: 20px 40px;
+            background: #f5f5f5;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: #0a1950;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+        
+        button:hover {
+            background: #1a2a6f;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .slide-counter {
+            color: #0a1950;
+            font-weight: bold;
+            min-width: 100px;
+            text-align: center;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        /* Quiz Styles */
+        .quiz-section {
+            display: none;
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        .quiz-section.active {
+            display: block;
+        }
+        
+        .quiz-question {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            border: 2px solid #e0e0e0;
+        }
+        
+        .quiz-question h3 {
+            color: #0a1950;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        
+        .quiz-question .question-text {
+            font-size: 1.1em;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .quiz-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .quiz-option {
+            background: #f9f9f9;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1em;
+        }
+        
+        .quiz-option:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+            transform: translateX(5px);
+        }
+        
+        .quiz-option input[type="radio"] {
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        
+        .quiz-option.selected {
+            border-color: #667eea;
+            background: #e8ecff;
+        }
+        
+        .quiz-option.correct {
+            border-color: #4caf50;
+            background: #e8f5e9;
+        }
+        
+        .quiz-option.incorrect {
+            border-color: #f44336;
+            background: #ffebee;
+        }
+        
+        .quiz-feedback {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        .quiz-feedback.show {
+            display: block;
+        }
+        
+        .quiz-feedback.correct {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            color: #2e7d32;
+        }
+        
+        .quiz-feedback.incorrect {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            color: #c62828;
+        }
+        
+        .quiz-results {
+            text-align: center;
+            padding: 40px 20px;
+        }
+        
+        .quiz-results h2 {
+            color: #0a1950;
+            font-size: 2em;
+            margin-bottom: 20px;
+        }
+        
+        .quiz-results .score {
+            font-size: 3em;
+            font-weight: bold;
+            color: #667eea;
+            margin: 20px 0;
+        }
+        
+        .quiz-results .score-text {
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            color: #666;
+            padding: 15px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            font-size: 1em;
+        }
+        
+        .tab-button:hover {
+            color: #0a1950;
+            background: none;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .tab-button.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        
+        .tabs {
+            display: flex;
+        }
+        
+        .tab-content {
+            flex: 1;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .slide h2 {
+                font-size: 1.5em;
+            }
+            
+            .slide li {
+                font-size: 1em;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            button {
+                width: 100%;
+            }
+            
+            .tab-buttons {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Solid State</h1>
+            <div class="subtitle">Interactive Learning Presentation</div>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        
+        <div class="tabs">
+            <div class="tab-content">
+                <div class="tab-buttons">
+                    <button class="tab-button active" onclick="switchTab('slides')">📊 Slides</button>
+                </div>
+                
+                <!-- SLIDES TAB -->
+                <div id="slides-tab" class="tab-content">
+                    <div class="content">
+                        <div class="slide active" data-slide="1">
+                            <div class="slide-number">Slide 1 of 6</div>
+                            <h2>Slide 1: Unit 1 - The Solid State</h2>
+                            <ul>
+                                <li>Exploring the Architecture of Matter</li>
+                                <li>Journey into the fundamental structure of solids</li>
+                                <li>How atoms and molecules stack together</li>
+                            </ul>
+                            <div class="visual-note">📸 Visual: 3D computer rendering of crystal lattice structure with magnifying glass inspecting rock</div>
+                        </div>
+                        <div class="slide " data-slide="2">
+                            <div class="slide-number">Slide 2 of 6</div>
+                            <h2>Slide 2: Comprehensive Learning Objectives (Part 1/3)</h2>
+                            <ul>
+                                <li>Describe general characteristics of the solid state</li>
+                                <li>Distinguish between amorphous and crystalline solids</li>
+                                <li>Classify crystalline solids based on binding forces</li>
+                                <li>Define crystal lattice and unit cell</li>
+                            </ul>
+                            <div class="visual-note">📸 Visual: Bulleted list with flat-design academic icons of cube, magnifying glass, and magnet</div>
+                        </div>
+                        <div class="slide " data-slide="3">
+                            <div class="slide-number">Slide 3 of 6</div>
+                            <h2>Slide 3: Comprehensive Learning Objectives (Part 2/3)</h2>
+                            <ul>
+                                <li>Explain the close packing of particles</li>
+                                <li>Describe different types of voids and close-packed structures</li>
+                                <li>Calculate the packing efficiency of different cubic unit cells</li>
+                                <li>Correlate the density of a substance with its unit cell properties</li>
+                            </ul>
+                            <div class="visual-note">📸 Visual: Bulleted list with icons of stacked spheres, measuring scale, and math formula</div>
+                        </div>
+                        <div class="slide " data-slide="4">
+                            <div class="slide-number">Slide 4 of 6</div>
+                            <h2>Slide 4: Comprehensive Learning Objectives (Part 3/3)</h2>
+                            <ul>
+                                <li>Describe imperfections and defects in solids</li>
+                                <li>Correlate electrical properties of solids with their structure</li>
+                                <li>Correlate magnetic properties of solids with their structure</li>
+                                <li>Understanding how microscopic defects affect material properties</li>
+                            </ul>
+                            <div class="visual-note">📸 Visual: Icons of lightning bolt, horseshoe magnet, and crystal with missing piece</div>
+                        </div>
+                        <div class="slide " data-slide="5">
+                            <div class="slide-number">Slide 5 of 6</div>
+                            <h2>Slide 5: Introduction to States of Matter</h2>
+                            <ul>
+                                <li>Matter exists in three primary states: Solid, Liquid, and Gas</li>
+                                <li>Liquids and gases are fluids because molecules are free to move and flow</li>
+                                <li>Solids are rigid because constituent particles have fixed positions</li>
+                                <li>Atoms in solids can only vibrate in place, not move freely</li>
+                            </ul>
+                            <div class="visual-note">📸 Visual: Three-panel graphic comparing gas particles bouncing, liquid particles flowing, solid particles vibrating in place</div>
+                        </div>
+                        <div class="slide " data-slide="6">
+                            <div class="slide-number">Slide 6 of 6</div>
+                            <h2>Slide 6: The Battle of Opposing Forces</h2>
+                            <ul>
+                                <li>Two opposing forces determine the state of matter</li>
+                                <li>Intermolecular Forces: Pull particles tightly together (like glue)</li>
+                                <li>Thermal Energy: Keeps particles moving and bouncing apart (like heat)</li>
+                                <li>At low temperatures, thermal energy decreases and intermolecular forces dominate</li>
+                            </ul>
+                            <div class="visual-note">📸 Visual: Tug-of-war analogy between magnet pulling together and flame shaking apart</div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="prevBtn" onclick="previousSlide()">← Previous</button>
+            <div class="slide-counter">
+                <span id="slideNum">1</span> / <span id="totalSlides">6</span>
+            </div>
+            <button id="nextBtn" onclick="nextSlide()">Next →</button>
+        </div>
+    </div>
+    
+    <script>
+        let currentSlide = 1;
+        const totalSlides = 6;
+        const totalQuestions = 0;
+        let quizAnswers = {};
+        
+        function showSlide(n) {
+            const slides = document.querySelectorAll('.slide');
+            if (n > totalSlides) { currentSlide = totalSlides; }
+            if (n < 1) { currentSlide = 1; }
+            
+            slides.forEach(slide => slide.classList.remove('active'));
+            slides[currentSlide - 1].classList.add('active');
+            
+            document.getElementById('slideNum').textContent = currentSlide;
+            document.getElementById('prevBtn').disabled = currentSlide === 1;
+            document.getElementById('nextBtn').disabled = currentSlide === totalSlides;
+            
+            const progress = (currentSlide / totalSlides) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+        }
+        
+        function nextSlide() {
+            currentSlide++;
+            showSlide(currentSlide);
+        }
+        
+        function previousSlide() {
+            currentSlide--;
+            showSlide(currentSlide);
+        }
+        
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            const slidesTab = document.getElementById('slides-tab');
+            const quizTab = document.getElementById('quiz-tab');
+            
+            if (tab === 'slides') {
+                slidesTab.style.display = 'block';
+                if (quizTab) quizTab.style.display = 'none';
+            } else {
+                slidesTab.style.display = 'none';
+                if (quizTab) quizTab.style.display = 'block';
+            }
+        }
+        
+        function checkAnswer(questionNum, selectedIdx, correctIdx) {
+            quizAnswers[questionNum] = selectedIdx === correctIdx;
+            
+            const labels = document.querySelectorAll(`[data-question="${questionNum}"] .quiz-option`);
+            
+            labels.forEach((label, idx) => {
+                label.classList.remove('selected', 'correct', 'incorrect');
+                if (idx === selectedIdx) {
+                    label.classList.add('selected');
+                    label.classList.add(idx === correctIdx ? 'correct' : 'incorrect');
+                }
+            });
+            
+            document.getElementById(`feedback-${questionNum}`).classList.add('show');
+            
+            if (Object.keys(quizAnswers).length === totalQuestions) {
+                showQuizResults();
+            }
+        }
+        
+        function showQuizResults() {
+            document.getElementById('quiz-questions').style.display = 'none';
+            document.getElementById('quiz-results').style.display = 'block';
+            
+            const correct = Object.values(quizAnswers).filter(v => v).length;
+            const percentage = Math.round((correct / totalQuestions) * 100);
+            
+            document.getElementById('final-score').textContent = percentage + '%';
+            document.getElementById('score-text').textContent = `${correct} out of ${totalQuestions} correct`;
+        }
+        
+        function checkAnswerInline(questionNum, selectedIdx, correctIdx) {
+            quizAnswers[questionNum] = selectedIdx === correctIdx;
+            
+            const labels = document.querySelectorAll(`[data-question-inline="${questionNum}"] .quiz-option, input[name="q${questionNum}"]`).parentElement;
+            
+            // Find all options for this question on this slide
+            const currentSlideDiv = document.querySelector('.slide.active');
+            if (!currentSlideDiv) return;
+            
+            const radioInputs = currentSlideDiv.querySelectorAll(`input[name="q${questionNum}"]`);
+            const options = [];
+            radioInputs.forEach(input => {
+                if (input.parentElement && input.parentElement.classList.contains('quiz-option')) {
+                    options.push(input.parentElement);
+                }
+            });
+            
+            options.forEach((opt, idx) => {
+                opt.classList.remove('selected', 'correct', 'incorrect');
+                if (idx === selectedIdx) {
+                    opt.classList.add('selected');
+                    opt.classList.add(idx === correctIdx ? 'correct' : 'incorrect');
+                }
+            });
+            
+            const feedbackDiv = currentSlideDiv.querySelector(`#feedback-${questionNum}`);
+            if (feedbackDiv) {
+                feedbackDiv.classList.add('show');
+            }
+        }
+        
+        function resetQuiz() {
+            quizAnswers = {};
+            document.getElementById('quiz-questions').style.display = 'block';
+            document.getElementById('quiz-results').style.display = 'none';
+            
+            document.querySelectorAll('.quiz-option').forEach(opt => {
+                opt.classList.remove('selected', 'correct', 'incorrect');
+                opt.querySelector('input').checked = false;
+            });
+            
+            document.querySelectorAll('.quiz-feedback').forEach(fb => {
+                fb.classList.remove('show');
+            });
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            showSlide(currentSlide);
+            document.addEventListener('keydown', function(event) {
+                if (event.key === 'ArrowRight') nextSlide();
+                if (event.key === 'ArrowLeft') previousSlide();
+            });
+        });
+    </script>
+</body>
+</html>

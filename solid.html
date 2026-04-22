@@ -1,0 +1,12 @@
+<html>
+<body>
+    <script src="https://js.puter.com/v2/"></script>
+    <script>
+        puter.ai.chat("Explain quantum computing in simple terms", {
+            model: "anthropic/claude-opus-4-7"
+        }).then(response => {
+            document.body.innerHTML = response.message.content;
+        });
+    </script>
+</body>
+</html>

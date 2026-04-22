@@ -4,3 +4,5 @@ google-genai
 Pillow
 requests
 fpdf2
+mistralai
+python-dotenv

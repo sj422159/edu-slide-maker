@@ -17,15 +17,15 @@ API_KEY = os.getenv('GEMINI_API_KEY')
 client = genai.Client(api_key=API_KEY)
 
 # Professional Color Palette
-DARK_BG       = RGBColor(3, 0, 46)       # Deep navy-black
-ACCENT_BG     = RGBColor(30, 60, 114)       # Section header blue
-CARD_BG       = RGBColor(34, 40, 60)        # Slightly lighter card
-WHITE         = RGBColor(255, 255, 255)
-LIGHT_GRAY    = RGBColor(200, 210, 225)
-ACCENT_GOLD   = RGBColor(255, 196, 61)      # Gold accent
-ACCENT_CYAN   = RGBColor(0, 188, 212)       # Teal accent for highlights
-SUBTLE_GRAY   = RGBColor(120, 130, 150)
-BULLET_COLOR  = RGBColor(0, 188, 212)
+DARK_BG       = RGBColor(255, 255, 255)       # White background
+ACCENT_BG     = RGBColor(240, 240, 240)       # Light gray accent
+CARD_BG       = RGBColor(250, 250, 250)       # Off-white card
+WHITE         = RGBColor(0, 0, 0)             # Black text
+LIGHT_GRAY    = RGBColor(80, 80, 80)          # Dark gray text
+ACCENT_GOLD   = RGBColor(0, 0, 0)             # Black accent
+ACCENT_CYAN   = RGBColor(60, 60, 60)          # Dark gray highlight
+SUBTLE_GRAY   = RGBColor(150, 150, 150)
+BULLET_COLOR  = RGBColor(0, 0, 0)             # Black bullets
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
@@ -85,40 +85,113 @@ def gemini_generate(prompt, max_retries=3):
     raise RuntimeError(f"All Gemini models exhausted. Tried: {', '.join(errors)}")
 
 # ==========================================
-# IMAGE SCRAPER (Bing) — only used for diagram slides
+# IMAGE SCRAPER & GENERATOR (Bing + Gemini fallback)
 # ==========================================
+def generate_image_with_gemini(query):
+    """Generate image using Gemini's image generation capabilities."""
+    try:
+        print(f"  🎨 Generating image with Gemini for: {query[:40]}...")
+        
+        # Refine prompt for better image generation
+        refined_prompt = f"Create a clear, professional diagram or illustration of: {query}. Style: clean, educational, high-quality."
+        
+        # Use Gemini to generate an image
+        response = client.models.generate_images(
+            model="gemini-3.1-flash-image-preview",
+            prompt=refined_prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                safety_filter_level="block_only_high",
+                aspect_ratio="1:1",
+            )
+        )
+        
+        if response and hasattr(response, 'generated_images') and response.generated_images:
+            img_obj = response.generated_images[0]
+            
+            # Try to get the image URL
+            img_url = None
+            if hasattr(img_obj, 'image'):
+                if hasattr(img_obj.image, 'display_url'):
+                    img_url = img_obj.image.display_url
+                elif hasattr(img_obj.image, 'gcs_uri'):
+                    img_url = img_obj.image.gcs_uri
+            elif hasattr(img_obj, 'display_url'):
+                img_url = img_obj.display_url
+            elif hasattr(img_obj, 'gcs_uri'):
+                img_url = img_obj.gcs_uri
+            
+            if img_url:
+                # Download the generated image
+                img_resp = requests.get(img_url, timeout=15)
+                if img_resp.status_code == 200:
+                    stream = BytesIO(img_resp.content)
+                    img = Image.open(stream)
+                    buf = BytesIO()
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(buf, format='PNG')
+                    buf.seek(0)
+                    print(f"  ✓ Image generated successfully")
+                    return buf
+    except Exception as e:
+        print(f"  ⚠️ Gemini generation failed: {str(e)[:80]}")
+    
+    return None
+
 def scrape_image(query):
+    """Fetch image from web or generate using Gemini as fallback."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     }
+    
+    # Try web scraping first
     try:
+        print(f"  🔍 Scraping image for: {query[:40]}...")
         url = f"https://www.bing.com/images/search?q={quote_plus(query)}&first=1"
-        resp = requests.get(url, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            return None, f"HTTP {resp.status_code}"
-        img_urls = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', resp.text)
-        if not img_urls:
-            img_urls = re.findall(r'src2?="(https?://[^"]+\.(?:jpg|jpeg|png|webp))', resp.text)
-        for img_url in img_urls[:5]:
-            try:
-                r = requests.get(img_url, headers=headers, timeout=10)
-                if r.status_code == 200 and len(r.content) > 2000:
-                    stream = BytesIO(r.content)
-                    img = Image.open(stream)
-                    if img.format not in ('BMP', 'GIF', 'JPEG', 'PNG', 'TIFF', 'WMF'):
-                        buf = BytesIO()
-                        img.convert('RGBA').save(buf, format='PNG')
-                        buf.seek(0)
-                        return buf, "OK"
-                    stream.seek(0)
-                    return stream, "OK"
-            except Exception:
-                continue
-        return None, "No downloadable image"
+        resp = requests.get(url, headers=headers, timeout=12)
+        if resp.status_code == 200:
+            img_urls = re.findall(r'murl&quot;:&quot;(https?://[^&]+?)&quot;', resp.text)
+            if not img_urls:
+                img_urls = re.findall(r'src2?="(https?://[^"]+\.(?:jpg|jpeg|png|webp))', resp.text)
+            
+            for img_url in img_urls[:5]:
+                try:
+                    r = requests.get(img_url, headers=headers, timeout=8)
+                    if r.status_code == 200 and len(r.content) > 2000:
+                        stream = BytesIO(r.content)
+                        try:
+                            img = Image.open(stream)
+                            img.load()
+                            
+                            if img.format not in ('JPEG', 'PNG'):
+                                buf = BytesIO()
+                                if img.mode != 'RGB':
+                                    img = img.convert('RGB')
+                                img.save(buf, format='PNG')
+                                buf.seek(0)
+                                print(f"  ✓ Image scraped successfully")
+                                return buf, "OK"
+                            else:
+                                stream.seek(0)
+                                print(f"  ✓ Image scraped successfully")
+                                return stream, "OK"
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
     except Exception as e:
-        return None, str(e)
+        print(f"  ⚠️ Web scraping failed: {str(e)[:60]}")
+    
+    # Fallback to Gemini image generation
+    print(f"  📡 Falling back to Gemini generation...")
+    img_buf = generate_image_with_gemini(query)
+    if img_buf:
+        return img_buf, "Generated with Gemini"
+    
+    return None, "No image available"
 
 # ==========================================
 # SHAPE HELPERS
@@ -267,69 +340,97 @@ def build_section_slide(prs, section_number, section_title):
     add_logo(slide)
 
 def build_content_slide(prs, slide_num, title, bullets):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, DARK_BG)
-
-    # Title
-    add_textbox(slide, Inches(0.5), Inches(0.3), Inches(12.33), Inches(0.8),
-                title, font_size=30, color=ACCENT_GOLD, bold=True,
-                alignment=PP_ALIGN.CENTER, font_name=FONT_TITLE)
-
-    # Accent underline
-    add_accent_line(slide, Inches(0.8), Inches(1.2), Inches(11.73))
-
-    # Content card
-    add_rounded_card(slide, Inches(0.8), Inches(1.5), Inches(11.73), Inches(5.5))
-
-    # Bullet list inside card
+    """Build content slides with automatic overflow handling - creates new slides if needed."""
+    # Parse bullets into list
     if isinstance(bullets, list):
-        add_bullet_list(slide, Inches(1.3), Inches(1.8), Inches(10.73), Inches(5),
-                        bullets, font_size=18, color=WHITE)
+        items = bullets
     else:
         # If body is a string, split into lines
-        lines = [l.strip('- •▸') .strip() for l in str(bullets).split('\n') if l.strip()]
-        if len(lines) <= 1:
-            lines = [s.strip() for s in str(bullets).split('.') if s.strip()]
+        items = [l.strip('- •▸').strip() for l in str(bullets).split('\n') if l.strip()]
+        if len(items) <= 1:
+            items = [s.strip() for s in str(bullets).split('.') if s.strip()]
+    
+    # Calculate max items per slide (with font_size=18, approximately 6-7 items fit in 5 inches)
+    max_items_per_slide = 7
+    
+    # Split items into chunks
+    item_chunks = [items[i:i + max_items_per_slide] for i in range(0, len(items), max_items_per_slide)]
+    
+    for chunk_idx, chunk_items in enumerate(item_chunks):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        set_slide_bg(slide, DARK_BG)
+        
+        # Title
+        display_title = title if chunk_idx == 0 else f"{title} (continued)"
+        add_textbox(slide, Inches(0.5), Inches(0.3), Inches(12.33), Inches(0.8),
+                    display_title, font_size=30, color=ACCENT_GOLD, bold=True,
+                    alignment=PP_ALIGN.CENTER, font_name=FONT_TITLE)
+        
+        # Accent underline
+        add_accent_line(slide, Inches(0.8), Inches(1.2), Inches(11.73))
+        
+        # Content card
+        add_rounded_card(slide, Inches(0.8), Inches(1.5), Inches(11.73), Inches(5.5))
+        
+        # Bullet list inside card
         add_bullet_list(slide, Inches(1.3), Inches(1.8), Inches(10.73), Inches(5),
-                        lines[:10], font_size=18, color=WHITE)
-
-    add_logo(slide)
+                        chunk_items, font_size=18, color=WHITE)
+        
+        add_logo(slide)
 
 def build_diagram_slide(prs, slide_num, title, bullets, search_query):
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, DARK_BG)
-
-    # Title
-    add_textbox(slide, Inches(0.5), Inches(0.3), Inches(12.33), Inches(0.8),
-                title, font_size=28, color=ACCENT_GOLD, bold=True,
-                alignment=PP_ALIGN.CENTER, font_name=FONT_TITLE)
-
-    add_accent_line(slide, Inches(0.8), Inches(1.2), Inches(11.73))
-
-    # LEFT: content card (narrower)
-    add_rounded_card(slide, Inches(0.8), Inches(1.5), Inches(5.5), Inches(5.5))
-
+    """Build diagram slides with image support - creates new slides if needed for overflow."""
+    # Parse bullets into list
     if isinstance(bullets, list):
         items = bullets
     else:
         items = [l.strip('- •▸').strip() for l in str(bullets).split('\n') if l.strip()]
         if len(items) <= 1:
             items = [s.strip() for s in str(bullets).split('.') if s.strip()]
-
-    add_bullet_list(slide, Inches(1.2), Inches(1.8), Inches(4.8), Inches(5),
-                    items[:8], font_size=18, color=WHITE)
-
-    # RIGHT: diagram image
-    img_stream, status = scrape_image(search_query)
-    if img_stream:
-        print(f"  Slide {slide_num}: ✅ Diagram fetched")
-        # Image card background
-        add_rounded_card(slide, Inches(6.8), Inches(1.5), Inches(6.03), Inches(5.5),
-                         fill_color=RGBColor(25, 30, 48))
-        slide.shapes.add_picture(img_stream, Inches(7.0), Inches(1.7),
-                                 width=Inches(5.6), height=Inches(5.0))
-    else:
-        print(f"  Slide {slide_num}: ❌ No diagram | {status}")
+    
+    # Calculate max items per slide (with font_size=18, approximately 5-6 items fit in 5 inches on left)
+    max_items_per_slide = 5
+    
+    # Split items into chunks
+    item_chunks = [items[i:i + max_items_per_slide] for i in range(0, len(items), max_items_per_slide)]
+    
+    for chunk_idx, chunk_items in enumerate(item_chunks):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        set_slide_bg(slide, DARK_BG)
+        
+        # Title
+        display_title = title if chunk_idx == 0 else f"{title} (continued)"
+        add_textbox(slide, Inches(0.5), Inches(0.3), Inches(12.33), Inches(0.8),
+                    display_title, font_size=28, color=ACCENT_GOLD, bold=True,
+                    alignment=PP_ALIGN.CENTER, font_name=FONT_TITLE)
+        
+        add_accent_line(slide, Inches(0.8), Inches(1.2), Inches(11.73))
+        
+        # Only show image on the first slide (chunk_idx == 0)
+        if chunk_idx == 0:
+            # LEFT: content card (narrower)
+            add_rounded_card(slide, Inches(0.8), Inches(1.5), Inches(5.5), Inches(5.5))
+            add_bullet_list(slide, Inches(1.2), Inches(1.8), Inches(4.8), Inches(5),
+                            chunk_items, font_size=18, color=WHITE)
+            
+            # RIGHT: diagram image
+            img_stream, status = scrape_image(search_query)
+            if img_stream:
+                print(f"  Slide {slide_num}: ✅ Diagram fetched")
+                # Image card background
+                add_rounded_card(slide, Inches(6.8), Inches(1.5), Inches(6.03), Inches(5.5),
+                                 fill_color=RGBColor(25, 30, 48))
+                slide.shapes.add_picture(img_stream, Inches(7.0), Inches(1.7),
+                                         width=Inches(5.6), height=Inches(5.0))
+            else:
+                print(f"  Slide {slide_num}: ❌ No diagram | {status}")
+        else:
+            # Continuation slides: full width content (no image)
+            add_rounded_card(slide, Inches(0.8), Inches(1.5), Inches(11.73), Inches(5.5))
+            add_bullet_list(slide, Inches(1.3), Inches(1.8), Inches(10.73), Inches(5),
+                            chunk_items, font_size=18, color=WHITE)
+        
+        add_logo(slide)
         # Placeholder card
         add_rounded_card(slide, Inches(6.8), Inches(1.5), Inches(6.03), Inches(5.5),
                          fill_color=RGBColor(25, 30, 48))
