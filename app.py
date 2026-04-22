@@ -18,8 +18,7 @@ from io import BytesIO
 from PIL import Image
 from fpdf import FPDF
 import tempfile
-import pythoncom
-import win32com.client
+
 
 try:
     from html_generator import generate_html_from_outline
