@@ -18,6 +18,10 @@ from io import BytesIO
 from PIL import Image
 from fpdf import FPDF
 import tempfile
+<<<<<<< HEAD
+=======
+
+>>>>>>> 44a003b6b5c70ad7031eb9e92339c81d54fe05f3
 
 try:
     from html_generator import generate_html_from_outline
