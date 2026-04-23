@@ -1,4 +1,5 @@
 import os, json, re, time
+import random
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from google import genai
@@ -37,6 +38,15 @@ MISTRAL_MODELS = [
     "mistral-large-latest",
     "mistral-medium-latest",
 ]
+
+# ==========================================
+# IMAGE PLACEMENT LOGIC
+# ==========================================
+def get_random_image_placement():
+    """Return a random image placement: 'left', 'right', or 'bottom'.
+    Slightly favors left/right (60%) over bottom (40%) for better engagement."""
+    placement = random.choices(['left', 'right', 'bottom'], weights=[30, 30, 40], k=1)[0]
+    return placement
 
 # ==========================================
 # GEMINI HELPERS
@@ -1128,6 +1138,96 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             font-size: 1.3em;
         }}
         
+        /* Image Placement Styles */
+        .slide-content-wrapper {{
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }}
+        
+        .slide-text {{
+            flex: 1;
+            min-width: 0;
+        }}
+        
+        .slide-image {{
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+        }}
+        
+        .slide-image img {{
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            object-fit: cover;
+            transition: transform 0.3s ease;
+        }}
+        
+        .slide-image img:hover {{
+            transform: scale(1.05);
+        }}
+        
+        .slide-image-caption {{
+            margin-top: 10px;
+            color: #666;
+            font-size: 0.85em;
+            font-style: italic;
+            text-align: center;
+            max-width: 280px;
+        }}
+        
+        .image-left .slide-content-wrapper {{
+            flex-direction: row;
+        }}
+        
+        .image-left .slide-image {{
+            order: -1;
+        }}
+        
+        .image-left .slide-image {{
+            width: 320px;
+        }}
+        
+        .image-right .slide-content-wrapper {{
+            flex-direction: row;
+        }}
+        
+        .image-right .slide-image {{
+            width: 320px;
+        }}
+        
+        .image-bottom .slide-content-wrapper {{
+            flex-direction: column;
+        }}
+        
+        .image-bottom .slide-image {{
+            width: 100%;
+            justify-content: center;
+        }}
+        
+        .image-bottom .slide-image img {{
+            max-width: 100%;
+            max-height: 300px;
+        }}
+        
+        @media (max-width: 768px) {{
+            .slide-content-wrapper {{
+                flex-direction: column !important;
+            }}
+            
+            .slide-image {{
+                width: 100% !important;
+                order: 0 !important;
+            }}
+            
+            .image-left .slide-image,
+            .image-right .slide-image {{
+                width: 100% !important;
+            }}
+        }}
+        
         .visual-note {{
             background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
             border: 2px dashed #ffc43d;
@@ -1426,41 +1526,96 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
     # Add slides with images and generated content
     slide_number = 1
     for idx, slide in enumerate(slides, 1):
-        html_content += f"""                        <div class="slide {'active' if idx == 1 else ''}" data-slide="{slide_number}">
+        # Determine image placement if this slide has an image
+        image_placement = get_random_image_placement() if slide.get('image_data') else None
+        placement_class = f"image-{image_placement}" if image_placement else ""
+        
+        html_content += f"""                        <div class="slide {placement_class} {'active' if idx == 1 else ''}" data-slide="{slide_number}">
                             <div class="slide-number">Slide {slide_number} of {len(slides) + len(quiz_questions)}</div>
                             <h2>{slide['title']}</h2>
-                            <ul>
 """
         
-        # Use generated content instead of raw bullets
-        for i, bullet in enumerate(slide['bullets']):
-            # Get generated content or fall back to cleaned bullet
-            if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
-                content = slide['generated_content'][i]
-            else:
-                # Remove visual markers for display
-                content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
-            
-            if content:
-                html_content += f"                                <li>{content}</li>\n"
-        
-        html_content += """                            </ul>
-"""
-        
-        # Add image if present (use pre-fetched image data)
+        # Add image if present (use pre-fetched image data) with smart placement
         if slide.get('image_data'):
             visual_text = " ".join([b for b in slide['bullets'] if '[VISUAL' in b or '[DIAGRAM' in b])
             visual_text = re.sub(r'\[VISUAL:\s*|\[DIAGRAM:\s*|\]', '', visual_text).strip()
             
-            html_content += f"""                            <div style="text-align: center; margin: 20px 0;">
-                                <img src="{slide['image_data']}" alt="{visual_text}" style="max-width: 100%; max-height: 300px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                                <p style="margin-top: 10px; color: #666; font-size: 0.9em; font-style: italic;">{visual_text}</p>
+            html_content += """                            <div class="slide-content-wrapper">
+"""
+            
+            # Add image wrapper
+            html_content += f"""                                <div class="slide-image">
+                                    <img src="{slide['image_data']}" alt="{visual_text}" style="max-width: 100%; max-height: 280px;">
+                                    <div class="slide-image-caption">{visual_text}</div>
+                                </div>
+"""
+            
+            # Add text wrapper
+            html_content += """                                <div class="slide-text">
+                                    <ul>
+"""
+            
+            # Use generated content instead of raw bullets
+            for i, bullet in enumerate(slide['bullets']):
+                # Get generated content or fall back to cleaned bullet
+                if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
+                    content = slide['generated_content'][i]
+                else:
+                    # Remove visual markers for display
+                    content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
+                
+                if content:
+                    html_content += f"                                        <li>{content}</li>\n"
+            
+            html_content += """                                    </ul>
+                                </div>
                             </div>
 """
         elif slide['has_visual']:
+            # Fallback for missing images
             visual_text = " ".join([b for b in slide['bullets'] if '[VISUAL' in b or '[DIAGRAM' in b])
             visual_text = re.sub(r'\[VISUAL:\s*|\[DIAGRAM:\s*|\]', '', visual_text).strip()
-            html_content += f"""                            <div class="visual-note">📸 Visual: {visual_text}</div>
+            
+            html_content += f"""                            <div class="slide-content-wrapper">
+                                <div class="slide-text">
+                                    <ul>
+"""
+            
+            # Use generated content instead of raw bullets
+            for i, bullet in enumerate(slide['bullets']):
+                # Get generated content or fall back to cleaned bullet
+                if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
+                    content = slide['generated_content'][i]
+                else:
+                    # Remove visual markers for display
+                    content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
+                
+                if content:
+                    html_content += f"                                        <li>{content}</li>\n"
+            
+            html_content += f"""                                    </ul>
+                                </div>
+                                <div class="visual-note">📸 Visual: {visual_text}</div>
+                            </div>
+"""
+        else:
+            # No image - just show bullet points
+            html_content += """                            <ul>
+"""
+            
+            # Use generated content instead of raw bullets
+            for i, bullet in enumerate(slide['bullets']):
+                # Get generated content or fall back to cleaned bullet
+                if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
+                    content = slide['generated_content'][i]
+                else:
+                    # Remove visual markers for display
+                    content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
+                
+                if content:
+                    html_content += f"                                <li>{content}</li>\n"
+            
+            html_content += """                            </ul>
 """
         
         html_content += """                        </div>
