@@ -43,9 +43,8 @@ MISTRAL_MODELS = [
 # IMAGE PLACEMENT LOGIC
 # ==========================================
 def get_random_image_placement():
-    """Return a random image placement: 'left', 'right', or 'bottom'.
-    Slightly favors left/right (60%) over bottom (40%) for better engagement."""
-    placement = random.choices(['left', 'right', 'bottom'], weights=[30, 30, 40], k=1)[0]
+    """Return a random image placement: 'left' or 'right' with 50/50 probability."""
+    placement = random.choice(['left', 'right'])
     return placement
 
 # ==========================================
@@ -942,7 +941,7 @@ def parse_outline_to_slides(outline_text, elaborate=True):
 # QUIZ GENERATION
 # ==========================================
 def generate_quiz_questions(slides_content, presentation_title):
-    """Generate quiz questions from slides using Mistral."""
+    """Generate quiz questions from slides using Mistral with robust error handling."""
     # Create content summary with generated content
     content_summary = []
     for slide in slides_content:
@@ -958,6 +957,10 @@ def generate_quiz_questions(slides_content, presentation_title):
                     slide_info += f"- {cleaned}\n"
         content_summary.append(slide_info)
     
+    if not content_summary:
+        print(f"    ⚠️ No slide content to create quiz from")
+        return []
+    
     prompt = f"""You are an expert educator creating a comprehensive quiz based on this presentation content:
 
 Presentation Title: {presentation_title}
@@ -965,30 +968,63 @@ Presentation Title: {presentation_title}
 Slide Content:
 {json.dumps(content_summary, indent=2)}
 
-Create a JSON array of quiz questions covering all major topics from the slides. 
+Generate a JSON array of quiz questions covering all major topics from the slides.
+Create at least 2-3 questions.
 
-For each question, include:
-- "slide_number": which slide(s) it covers
-- "question": the quiz question text
-- "options": array of 4 multiple choice options
-- "correct_answer": index of correct option (0-3)
-- "explanation": detailed explanation of the answer
+For EACH question, return this exact JSON structure:
+{{
+  "question": "The question text?",
+  "options": ["Option A", "Option B", "Option C", "Option D"],
+  "correct_answer": 0,
+  "explanation": "Why this is correct"
+}}
 
-Create at least 1-2 questions per 3 slides. Make questions at different difficulty levels:
-- Basic recall questions (30%)
-- Application/understanding questions (50%)
-- Analysis/higher-order thinking questions (20%)
-
-Return ONLY the JSON array, no markdown."""
+Return ONLY a valid JSON array with no markdown code fences, no extra text. Start with [ and end with ].
+Example: [{{"question":"...", "options":[...], "correct_answer":0, "explanation":"..."}}]"""
 
     try:
-        print(f"  📡 Mistral: Generating quiz questions...")
+        print(f"    📡 Calling Mistral for quiz...")
         response = mistral_generate_json(prompt)
-        questions = parse_json_response(response)
-        print(f"  ✓ Mistral: Generated {len(questions)} quiz questions")
-        return questions
+        print(f"    📝 Raw response received ({len(response)} chars)")
+        
+        # Clean and parse the response
+        cleaned = response.strip()
+        if '```json' in cleaned:
+            cleaned = cleaned.split('```json')[1].split('```')[0]
+        elif '```' in cleaned:
+            cleaned = cleaned.split('```')[1].split('```')[0]
+        
+        cleaned = cleaned.strip()
+        print(f"    🔍 Cleaned response ({len(cleaned)} chars)")
+        
+        # Try to parse JSON
+        if cleaned.startswith('['):
+            questions = json.loads(cleaned)
+        elif cleaned.startswith('{'):
+            # Single question wrapped in object - wrap in array
+            questions = [json.loads(cleaned)]
+        else:
+            # Try to find JSON array in response
+            match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+            if match:
+                questions = json.loads(match.group())
+            else:
+                print(f"    ❌ No JSON array found in response")
+                return []
+        
+        if isinstance(questions, list) and len(questions) > 0:
+            print(f"    ✓ Successfully parsed {len(questions)} quiz questions")
+            return questions
+        else:
+            print(f"    ⚠️ Parsed response but got {len(questions) if isinstance(questions, list) else 'non-list'} items")
+            return []
+            
+    except json.JSONDecodeError as e:
+        print(f"    ❌ JSON parse error: {str(e)[:60]}")
+        print(f"    Response preview: {cleaned[:200] if 'cleaned' in locals() else response[:200]}")
+        return []
     except Exception as e:
-        print(f"  ❌ Quiz generation failed: {str(e)[:60]}")
+        print(f"    ❌ Quiz generation error: {type(e).__name__}: {str(e)[:60]}")
         return []
 
 
@@ -1107,13 +1143,20 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             slide['enhancements'] = []
     
     # Generate quiz questions in parallel (while other tasks complete)
-    print("Step 3b/4: Generating quiz questions...")
+    print("Step 3b/5: Generating quiz questions...")
     quiz_questions = []
     if include_quiz:
         try:
+            print(f"  🎓 Creating quiz for {len(slides_structure)} slides...")
             quiz_questions = generate_quiz_questions(slides_structure, presentation_title)
+            if quiz_questions:
+                print(f"  ✓ Quiz generated: {len(quiz_questions)} questions")
+            else:
+                print(f"  ⚠️ Quiz generation returned empty list")
         except Exception as e:
-            print(f"Warning: Quiz generation failed: {e}")
+            print(f"  ❌ Quiz generation failed: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             quiz_questions = []
     
     print("Step 4/5: Building HTML...")
