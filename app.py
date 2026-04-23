@@ -19,6 +19,18 @@ from PIL import Image
 from fpdf import FPDF
 import tempfile
 
+# Import layout optimizer for PPT text management
+try:
+    from layout_optimizer import should_split_slide, split_bullets_intelligently, calculate_optimal_font_size
+except ImportError:
+    print("⚠️ Layout optimizer not found - using basic text handling")
+    def should_split_slide(text, font_size, max_height=5.5):
+        return False, 0, 0
+    def split_bullets_intelligently(bullets, target=4):
+        return [bullets]
+    def calculate_optimal_font_size(text, base=24, min_size=12):
+        return base
+
 try:
     from html_generator import generate_html_from_outline
 except Exception as e:
@@ -528,11 +540,8 @@ def build_content_slide(prs, title, bullets):
         if len(items) <= 1:
             items = [s.strip() for s in str(bullets).split('.') if s.strip()]
     
-    # Calculate max items per slide (with font_size=17, approximately 7-8 items fit in 5.5 inches)
-    max_items_per_slide = 8
-    
-    # Split items into chunks
-    item_chunks = [items[i:i + max_items_per_slide] for i in range(0, len(items), max_items_per_slide)]
+    # Intelligently split items - use smart chunking
+    item_chunks = split_bullets_intelligently(items, target_per_slide=6)
     
     for chunk_idx, chunk_items in enumerate(item_chunks):
         slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -542,7 +551,7 @@ def build_content_slide(prs, title, bullets):
         add_rect(slide, Inches(0), Inches(0), Inches(13.33), Inches(1.15), HEADING_BG)
         
         # Modify title to show continuation if multiple slides
-        display_title = title if chunk_idx == 0 else f"{title} (continued)"
+        display_title = title if chunk_idx == 0 else f"{title} (continued - {chunk_idx + 1})"
         add_textbox(slide, Inches(0.5), Inches(0.12), Inches(12.33), Inches(0.9),
                     display_title, font_size=30, color=HEADING_TEXT, bold=True,
                     alignment=PP_ALIGN.LEFT, font_name=FONT_TITLE)
@@ -553,9 +562,13 @@ def build_content_slide(prs, title, bullets):
         # Bullet card
         add_rect(slide, Inches(0.5), Inches(1.35), Inches(12.33), Inches(5.8), CARD_BG)
         
+        # Calculate optimal font size to prevent overflow
+        content_text = '\n'.join(chunk_items)
+        font_size = calculate_optimal_font_size(content_text, base_size_pt=17, min_size_pt=11)
+        
         # Add bullet list for this chunk
         add_bullet_list(slide, Inches(0.9), Inches(1.55), Inches(11.73), Inches(5.5),
-                        chunk_items, font_size=17)
+                        chunk_items, font_size=font_size)
         
         add_logo(slide)
 
@@ -570,11 +583,8 @@ def build_diagram_slide(prs, title, bullets, search_query):
         if len(items) <= 1:
             items = [s.strip() for s in str(bullets).split('.') if s.strip()]
     
-    # Calculate max items per slide (with font_size=16, approximately 5-6 items fit in 5.5 inches on left)
-    max_items_per_slide = 6
-    
-    # Split items into chunks
-    item_chunks = [items[i:i + max_items_per_slide] for i in range(0, len(items), max_items_per_slide)]
+    # Intelligently split items
+    item_chunks = split_bullets_intelligently(items, target_per_slide=5)
     
     for chunk_idx, chunk_items in enumerate(item_chunks):
         slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -582,7 +592,7 @@ def build_diagram_slide(prs, title, bullets, search_query):
         add_rect(slide, Inches(0), Inches(0), Inches(13.33), Inches(1.15), HEADING_BG)
         
         # Modify title to show continuation if multiple slides
-        display_title = title if chunk_idx == 0 else f"{title} (continued)"
+        display_title = title if chunk_idx == 0 else f"{title} (continued - {chunk_idx + 1})"
         add_textbox(slide, Inches(0.5), Inches(0.12), Inches(12.33), Inches(0.9),
                     display_title, font_size=28, color=HEADING_TEXT, bold=True,
                     alignment=PP_ALIGN.LEFT, font_name=FONT_TITLE)
@@ -592,8 +602,13 @@ def build_diagram_slide(prs, title, bullets, search_query):
         if chunk_idx == 0:
             # Left: bullet points with image on right (smaller left panel)
             add_rect(slide, Inches(0.5), Inches(1.35), Inches(5.6), Inches(5.8), CARD_BG)
+            
+            # Calculate optimal font size for smaller left panel
+            content_text = '\n'.join(chunk_items)
+            font_size = calculate_optimal_font_size(content_text, base_size_pt=14, min_size_pt=10)
+            
             add_bullet_list(slide, Inches(0.9), Inches(1.55), Inches(5.0), Inches(5.5),
-                            chunk_items, font_size=16)
+                            chunk_items, font_size=font_size)
             
             # Right: image panel
             img_stream = scrape_image(search_query)
@@ -608,8 +623,13 @@ def build_diagram_slide(prs, title, bullets, search_query):
         else:
             # Continuation slides: full width bullet list (no image)
             add_rect(slide, Inches(0.5), Inches(1.35), Inches(12.33), Inches(5.8), CARD_BG)
+            
+            # Calculate optimal font size for full width
+            content_text = '\n'.join(chunk_items)
+            font_size = calculate_optimal_font_size(content_text, base_size_pt=17, min_size_pt=11)
+            
             add_bullet_list(slide, Inches(0.9), Inches(1.55), Inches(11.73), Inches(5.5),
-                            chunk_items, font_size=16)
+                            chunk_items, font_size=font_size)
         
         add_logo(slide)
 

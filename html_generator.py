@@ -12,6 +12,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from mistralai.client import Mistral
 
+# Try to import layout optimizer
+try:
+    from layout_optimizer import detect_best_layout
+except ImportError:
+    def detect_best_layout(title, bullets):
+        return 'grid'  # Fallback
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -46,6 +53,128 @@ def get_random_image_placement():
     """Return a random image placement: 'left' or 'right' with 50/50 probability."""
     placement = random.choice(['left', 'right'])
     return placement
+
+
+# ==========================================
+# MODERN LAYOUT RENDERERS
+# ==========================================
+def render_flowchart_layout(enhancements):
+    """Render vertical flowchart with downward arrows."""
+    html = '<div class="flowchart-layout">\n'
+    for i, enh in enumerate(enhancements):
+        icon = enh.get('icon', '📌')
+        box_type = enh.get('box_type', 'key-point')
+        content = enh.get('enhanced') or enh.get('original', '')
+        label = box_type.replace('-', ' ').title()
+        
+        html += f'''                            <div class="flowchart-block box-{box_type}">
+                                <div class="flow-icon">{icon}</div>
+                                <div class="flow-content">
+                                    <div class="flow-label">{label}</div>
+                                    <p>{content}</p>
+                                </div>
+                            </div>
+'''
+        if i < len(enhancements) - 1:
+            html += '                            <div class="flow-arrow">↓</div>\n'
+    
+    html += '                        </div>\n'
+    return html
+
+
+def render_mindmap_layout(enhancements):
+    """Render mind-map with central concept and radiating branches."""
+    if not enhancements:
+        return ''
+    
+    html = '<div class="mindmap-layout">\n'
+    
+    # Center item (first one)
+    center = enhancements[0]
+    icon = center.get('icon', '📌')
+    content = center.get('enhanced') or center.get('original', '')
+    
+    html += f'''                            <div class="mindmap-center box-{center.get('box_type', 'key-point')}">
+                                <div class="map-icon">{icon}</div>
+                                <p>{content}</p>
+                            </div>
+'''
+    
+    # Branch items
+    branches_html = ''
+    for i, enh in enumerate(enhancements[1:], 1):
+        icon = enh.get('icon', '📌')
+        box_type = enh.get('box_type', 'key-point')
+        content = enh.get('enhanced') or enh.get('original', '')
+        
+        # Position branches in circle
+        angle = (i - 1) * (360 / max(1, len(enhancements) - 1))
+        
+        branches_html += f'''                            <div class="mindmap-branch box-{box_type}" style="--angle: {angle}deg;">
+                                <div class="branch-connector"></div>
+                                <div class="branch-block">
+                                    <div class="map-icon">{icon}</div>
+                                    <p>{content}</p>
+                                </div>
+                            </div>
+'''
+    
+    html += branches_html + '                        </div>\n'
+    return html
+
+
+def render_timeline_layout(enhancements):
+    """Render horizontal timeline with connected events."""
+    html = '<div class="timeline-layout">\n'
+    for i, enh in enumerate(enhancements):
+        icon = enh.get('icon', '📌')
+        box_type = enh.get('box_type', 'key-point')
+        content = enh.get('enhanced') or enh.get('original', '')
+        
+        position = (i / max(1, len(enhancements) - 1)) * 100 if len(enhancements) > 1 else 50
+        
+        html += f'''                            <div class="timeline-item box-{box_type}" style="--position: {position}%;">
+                                <div class="timeline-dot">{icon}</div>
+                                <div class="timeline-content">
+                                    <p>{content}</p>
+                                </div>
+                            </div>
+'''
+    
+    html += '                        </div>\n'
+    return html
+
+
+def render_grid_layout(enhancements):
+    """Render grid layout with categorized blocks."""
+    html = '<div class="grid-layout">\n'
+    for enh in enhancements:
+        icon = enh.get('icon', '📌')
+        box_type = enh.get('box_type', 'key-point')
+        content = enh.get('enhanced') or enh.get('original', '')
+        label = box_type.replace('-', ' ').title()
+        
+        html += f'''                            <div class="grid-card box-{box_type}">
+                                <div class="card-icon">{icon}</div>
+                                <div class="card-label">{label}</div>
+                                <p>{content}</p>
+                            </div>
+'''
+    
+    html += '                        </div>\n'
+    return html
+
+
+def render_layout_html(slide_title, enhancements, layout_type):
+    """Render appropriate layout based on type."""
+    if layout_type == 'flowchart':
+        return render_flowchart_layout(enhancements)
+    elif layout_type == 'mind-map':
+        return render_mindmap_layout(enhancements)
+    elif layout_type == 'timeline':
+        return render_timeline_layout(enhancements)
+    else:  # grid
+        return render_grid_layout(enhancements)
 
 # ==========================================
 # GEMINI HELPERS
@@ -663,30 +792,42 @@ def enhance_content_with_mistral(bullets, slide_title):
         
         bullets_str = "\n".join([f"{i+1}. {b}" for i, b in enumerate(bullets) if not ('[VISUAL:' in b or '[DIAGRAM:' in b)])
         
-        prompt = f"""You are a modern presentation designer. Enhance these educational bullet points with:
-1. A relevant emoji/icon (single character)
-2. A box_type: 'key-point', 'tip', 'warning', 'insight', 'fact', 'example', 'definition'
-3. Optional: A slightly rewritten version for maximum engagement (keep it concise)
+        prompt = f"""You are a modern presentation designer creating educational content. Categorize and enhance these bullet points.
 
 Slide Title: {slide_title}
 
-Bullets:
+IMPORTANT: Use DIVERSE box types based on the ACTUAL CONTENT:
+- 'key-point': Core concepts, main ideas (use sparingly - max 30%)
+- 'definition': Technical terms, formal explanations (use when defining something)
+- 'fact': Factual information, statistics, data points
+- 'example': Real-world examples, case studies, scenarios
+- 'tip': Practical advice, best practices, how-tos
+- 'insight': Connections, deeper understanding, analysis
+- 'warning': Important cautions, risks, things to avoid
+
+Bullets to enhance:
 {bullets_str}
 
-Return ONLY valid JSON (no markdown, no extra text):
+For EACH bullet, analyze its content and assign the MOST APPROPRIATE box_type (not always key-point!).
+Choose diverse types - avoid repeating the same type.
+
+Return ONLY valid JSON (no markdown):
 {{
   "enhancements": [
     {{
-      "original": "original bullet text",
-      "icon": "📌",
-      "box_type": "key-point",
-      "enhanced": "optional rewritten version or null to keep original"
+      "original": "exact original text",
+      "icon": "emoji",
+      "box_type": "appropriate-type",
+      "enhanced": "polished text or null"
     }}
   ]
 }}
 
-Make icons diverse and relevant. Box types should match content (tips end in ":", warnings are important, etc).
-Keep enhanced text punchy and clear."""
+Rules:
+1. Pick box_type based on content, not arbitrarily
+2. Use all 7 types appropriately - don't repeat same type
+3. One emoji per item, make diverse and relevant
+4. Keep enhanced text concise (1-2 sentences max)"""
 
         response_text = mistral_generate_json(prompt)
         
@@ -698,20 +839,29 @@ Keep enhanced text punchy and clear."""
             response_text = response_text.split('```')[1].split('```')[0]
         
         result = json.loads(response_text)
-        print(f"    ✓ Enhanced {len(result.get('enhancements', []))} items")
-        return result.get('enhancements', [])
+        enhancements = result.get('enhancements', [])
+        
+        # Validate and ensure diverse box types
+        box_types_used = {}
+        for enh in enhancements:
+            bt = enh.get('box_type', 'key-point')
+            box_types_used[bt] = box_types_used.get(bt, 0) + 1
+        
+        print(f"    ✓ Enhanced {len(enhancements)} items: {dict(box_types_used)}")
+        return enhancements
         
     except Exception as e:
         print(f"    ⚠️ Enhancement failed: {str(e)[:50]}")
-        # Return basic enhancements with just icons if Mistral fails
+        # Return basic enhancements with varied types if Mistral fails
+        type_cycle = ['key-point', 'fact', 'example', 'tip', 'definition', 'insight', 'warning']
         return [
             {
                 'original': b,
                 'icon': '📌',
-                'box_type': 'key-point',
+                'box_type': type_cycle[i % len(type_cycle)],
                 'enhanced': None
             }
-            for b in bullets if not ('[VISUAL:' in b or '[DIAGRAM:' in b)
+            for i, b in enumerate(bullets) if not ('[VISUAL:' in b or '[DIAGRAM:' in b)
         ]
 
 # ==========================================
@@ -1343,6 +1493,241 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             max-height: 300px;
         }}
         
+        /* Modern Layout Styles */
+        .flowchart-layout {{
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            align-items: center;
+        }}
+        
+        .flowchart-block {{
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            padding: 15px;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 600px;
+            animation: slideIn 0.5s ease;
+        }}
+        
+        .flow-icon {{
+            font-size: 2em;
+            min-width: 50px;
+            text-align: center;
+        }}
+        
+        .flow-content {{
+            flex: 1;
+        }}
+        
+        .flow-label {{
+            font-size: 0.75em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+            opacity: 0.8;
+        }}
+        
+        .flow-arrow {{
+            font-size: 2em;
+            color: #667eea;
+            animation: pulse 1s infinite;
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 0.5; }}
+            50% {{ opacity: 1; }}
+        }}
+        
+        @keyframes slideIn {{
+            from {{ opacity: 0; transform: translateX(-20px); }}
+            to {{ opacity: 1; transform: translateX(0); }}
+        }}
+        
+        /* Mind Map Layout */
+        .mindmap-layout {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            align-items: center;
+            justify-items: center;
+            position: relative;
+            height: 400px;
+        }}
+        
+        .mindmap-center {{
+            grid-column: 2;
+            grid-row: 1 / 3;
+            width: 150px;
+            height: 150px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 50%;
+            padding: 15px;
+            text-align: center;
+            position: relative;
+            z-index: 10;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }}
+        
+        .mindmap-branch {{
+            position: relative;
+            width: 140px;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }}
+        
+        .branch-connector {{
+            position: absolute;
+            width: 2px;
+            height: 100%;
+            background: #ddd;
+            left: 50%;
+            top: 0;
+        }}
+        
+        .map-icon {{
+            font-size: 1.8em;
+        }}
+        
+        /* Timeline Layout */
+        .timeline-layout {{
+            position: relative;
+            padding: 30px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }}
+        
+        .timeline-layout::before {{
+            content: '';
+            position: absolute;
+            top: 40px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            z-index: 0;
+        }}
+        
+        .timeline-item {{
+            position: relative;
+            width: 20%;
+            text-align: center;
+            z-index: 1;
+        }}
+        
+        .timeline-dot {{
+            width: 40px;
+            height: 40px;
+            margin: 0 auto 15px;
+            background: white;
+            border: 3px solid #667eea;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3em;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+        
+        .timeline-content {{
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+        }}
+        
+        /* Grid Layout */
+        .grid-layout {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 10px;
+        }}
+        
+        .grid-card {{
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }}
+        
+        .grid-card:hover {{
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }}
+        
+        .card-icon {{
+            font-size: 2.5em;
+        }}
+        
+        .card-label {{
+            font-size: 0.75em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        
+        .card-label p {{
+            font-size: 0.95em;
+            line-height: 1.5;
+            margin: 0;
+        }}
+        
+        @media (max-width: 768px) {{
+            .mindmap-layout {{
+                grid-template-columns: 1fr;
+                height: auto;
+                gap: 15px;
+            }}
+            
+            .mindmap-center {{
+                grid-column: 1;
+                grid-row: 1;
+            }}
+            
+            .mindmap-branch {{
+                width: 100%;
+            }}
+            
+            .timeline-layout {{
+                flex-direction: column;
+            }}
+            
+            .timeline-layout::before {{
+                top: auto;
+                left: 20px;
+                right: auto;
+                width: 3px;
+                height: 100%;
+            }}
+            
+            .timeline-item {{
+                width: 100%;
+                margin-left: 40px;
+            }}
+            
+            .grid-layout {{
+                grid-template-columns: 1fr;
+            }}
+        }}
+        
         @media (max-width: 768px) {{
             .slide-content-wrapper {{
                 flex-direction: column !important;
@@ -1797,20 +2182,16 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             # Render enhanced content boxes instead of plain bullets
             enhancements = slide.get('enhancements', [])
             if enhancements:
-                for enh in enhancements:
-                    icon = enh.get('icon', '📌')
-                    box_type = enh.get('box_type', 'key-point')
-                    content = enh.get('enhanced') or enh.get('original', '')
-                    label = box_type.replace('-', ' ').title()
-                    
-                    html_content += f"""                                    <div class="content-box box-{box_type}">
-                                        <div class="content-box-icon">{icon}</div>
-                                        <div class="content-box-text">
-                                            <div class="label">{label}</div>
-                                            <p>{content}</p>
-                                        </div>
-                                    </div>
-"""
+                # Detect best layout for this slide
+                bullet_texts = [enh.get('original', '') for enh in enhancements]
+                layout_type = detect_best_layout(slide['title'], bullet_texts)
+                
+                # For side-by-side, use grid layout even if flowchart detected
+                if layout_type == 'flowchart':
+                    layout_type = 'grid'
+                
+                layout_html = render_layout_html(slide['title'], enhancements, layout_type)
+                html_content += layout_html
             else:
                 # Fallback to regular bullets if no enhancements
                 html_content += """                                    <ul>
@@ -1875,24 +2256,19 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
                             </div>
 """
         else:
-            # No image - just show enhanced content boxes
+            # No image - use intelligent layout based on content
             # Render enhanced content boxes instead of plain bullets
             enhancements = slide.get('enhancements', [])
             if enhancements:
-                for enh in enhancements:
-                    icon = enh.get('icon', '📌')
-                    box_type = enh.get('box_type', 'key-point')
-                    content = enh.get('enhanced') or enh.get('original', '')
-                    label = box_type.replace('-', ' ').title()
-                    
-                    html_content += f"""                            <div class="content-box box-{box_type}">
-                                <div class="content-box-icon">{icon}</div>
-                                <div class="content-box-text">
-                                    <div class="label">{label}</div>
-                                    <p>{content}</p>
-                                </div>
-                            </div>
-"""
+                # Detect best layout for this slide
+                bullet_texts = [enh.get('original', '') for enh in enhancements]
+                layout_type = detect_best_layout(slide['title'], bullet_texts)
+                
+                print(f"    📐 Slide '{slide['title'][:30]}' → {layout_type} layout")
+                
+                # Render using intelligent layout
+                layout_html = render_layout_html(slide['title'], enhancements, layout_type)
+                html_content += layout_html
             else:
                 # Fallback to regular bullets if no enhancements
                 html_content += """                            <ul>
