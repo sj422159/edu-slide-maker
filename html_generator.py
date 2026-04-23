@@ -644,6 +644,78 @@ def get_image_for_visual(visual_description):
     return None
 
 # ==========================================
+# CONTENT ENHANCEMENT WITH MISTRAL
+# ==========================================
+def enhance_content_with_mistral(bullets, slide_title):
+    """Enhance bullet points with modern icons, box types, and better formatting using Mistral.
+    
+    Args:
+        bullets: List of bullet point texts
+        slide_title: The slide title for context
+    
+    Returns:
+        List of dicts with icon, box_type, and enhanced content
+    """
+    if not bullets:
+        return []
+    
+    try:
+        print(f"  ✨ Enhancing {len(bullets)} bullet points with Mistral...")
+        
+        bullets_str = "\n".join([f"{i+1}. {b}" for i, b in enumerate(bullets) if not ('[VISUAL:' in b or '[DIAGRAM:' in b)])
+        
+        prompt = f"""You are a modern presentation designer. Enhance these educational bullet points with:
+1. A relevant emoji/icon (single character)
+2. A box_type: 'key-point', 'tip', 'warning', 'insight', 'fact', 'example', 'definition'
+3. Optional: A slightly rewritten version for maximum engagement (keep it concise)
+
+Slide Title: {slide_title}
+
+Bullets:
+{bullets_str}
+
+Return ONLY valid JSON (no markdown, no extra text):
+{{
+  "enhancements": [
+    {{
+      "original": "original bullet text",
+      "icon": "📌",
+      "box_type": "key-point",
+      "enhanced": "optional rewritten version or null to keep original"
+    }}
+  ]
+}}
+
+Make icons diverse and relevant. Box types should match content (tips end in ":", warnings are important, etc).
+Keep enhanced text punchy and clear."""
+
+        response_text = mistral_generate_json(prompt)
+        
+        # Clean the JSON response
+        response_text = response_text.strip()
+        if '```json' in response_text:
+            response_text = response_text.split('```json')[1].split('```')[0]
+        elif '```' in response_text:
+            response_text = response_text.split('```')[1].split('```')[0]
+        
+        result = json.loads(response_text)
+        print(f"    ✓ Enhanced {len(result.get('enhancements', []))} items")
+        return result.get('enhancements', [])
+        
+    except Exception as e:
+        print(f"    ⚠️ Enhancement failed: {str(e)[:50]}")
+        # Return basic enhancements with just icons if Mistral fails
+        return [
+            {
+                'original': b,
+                'icon': '📌',
+                'box_type': 'key-point',
+                'enhanced': None
+            }
+            for b in bullets if not ('[VISUAL:' in b or '[DIAGRAM:' in b)
+        ]
+
+# ==========================================
 # CONTENT GENERATION FROM GEMINI (PARALLEL)
 # ==========================================
 def generate_content_for_bullet(bullet_text, slide_title, elaborate=True):
@@ -1018,8 +1090,24 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             if visual_text in images_map:
                 slide['image_data'] = images_map[visual_text]
     
+    # Enhance content with Mistral (icons, box types, modern formatting)
+    print("Step 3a/4: Enhancing content with modern icons and boxes...")
+    for slide in slides_structure:
+        # Get non-visual bullets
+        non_visual_bullets = [b for b in slide['bullets'] if not ('[VISUAL:' in b or '[DIAGRAM:' in b)]
+        
+        if non_visual_bullets:
+            try:
+                enhancements = enhance_content_with_mistral(non_visual_bullets, slide['title'])
+                slide['enhancements'] = enhancements
+            except Exception as e:
+                print(f"    ⚠️ Skipping enhancements for slide: {str(e)[:40]}")
+                slide['enhancements'] = []
+        else:
+            slide['enhancements'] = []
+    
     # Generate quiz questions in parallel (while other tasks complete)
-    print("Step 3/4: Generating quiz questions...")
+    print("Step 3b/4: Generating quiz questions...")
     quiz_questions = []
     if include_quiz:
         try:
@@ -1028,7 +1116,7 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             print(f"Warning: Quiz generation failed: {e}")
             quiz_questions = []
     
-    print("Step 4/4: Building HTML...")
+    print("Step 4/5: Building HTML...")
     # Now build the HTML with all content ready
     slides = slides_structure
     
@@ -1226,6 +1314,115 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             .image-right .slide-image {{
                 width: 100% !important;
             }}
+        }}
+        
+        /* Modern Content Boxes */
+        .content-box {{
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 12px 0;
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            transition: all 0.3s ease;
+        }}
+        
+        .content-box:hover {{
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }}
+        
+        .content-box-icon {{
+            font-size: 1.8em;
+            min-width: 2em;
+            text-align: center;
+            flex-shrink: 0;
+        }}
+        
+        .content-box-text {{
+            flex: 1;
+        }}
+        
+        .content-box-text .label {{
+            font-size: 0.75em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+            opacity: 0.7;
+        }}
+        
+        .content-box-text p {{
+            margin: 0;
+            font-size: 1em;
+            color: #333;
+            line-height: 1.6;
+        }}
+        
+        /* Box Type Variations */
+        .box-key-point {{
+            border-left-color: #667eea;
+            background: linear-gradient(135deg, rgba(102,126,234,0.05) 0%, rgba(118,75,162,0.05) 100%);
+        }}
+        
+        .box-key-point .label {{
+            color: #667eea;
+        }}
+        
+        .box-tip {{
+            border-left-color: #4caf50;
+            background: linear-gradient(135deg, rgba(76,175,80,0.05) 0%, rgba(56,142,60,0.05) 100%);
+        }}
+        
+        .box-tip .label {{
+            color: #4caf50;
+        }}
+        
+        .box-warning {{
+            border-left-color: #ff9800;
+            background: linear-gradient(135deg, rgba(255,152,0,0.05) 0%, rgba(245,127,23,0.05) 100%);
+        }}
+        
+        .box-warning .label {{
+            color: #ff9800;
+        }}
+        
+        .box-insight {{
+            border-left-color: #9c27b0;
+            background: linear-gradient(135deg, rgba(156,39,176,0.05) 0%, rgba(123,31,162,0.05) 100%);
+        }}
+        
+        .box-insight .label {{
+            color: #9c27b0;
+        }}
+        
+        .box-fact {{
+            border-left-color: #00bcd4;
+            background: linear-gradient(135deg, rgba(0,188,212,0.05) 0%, rgba(0,150,136,0.05) 100%);
+        }}
+        
+        .box-fact .label {{
+            color: #00bcd4;
+        }}
+        
+        .box-example {{
+            border-left-color: #f44336;
+            background: linear-gradient(135deg, rgba(244,67,54,0.05) 0%, rgba(211,47,47,0.05) 100%);
+        }}
+        
+        .box-example .label {{
+            color: #f44336;
+        }}
+        
+        .box-definition {{
+            border-left-color: #ff5722;
+            background: linear-gradient(135deg, rgba(255,87,34,0.05) 0%, rgba(230,74,25,0.05) 100%);
+        }}
+        
+        .box-definition .label {{
+            color: #ff5722;
         }}
         
         .visual-note {{
@@ -1552,23 +1749,41 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             
             # Add text wrapper
             html_content += """                                <div class="slide-text">
-                                    <ul>
 """
             
-            # Use generated content instead of raw bullets
-            for i, bullet in enumerate(slide['bullets']):
-                # Get generated content or fall back to cleaned bullet
-                if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
-                    content = slide['generated_content'][i]
-                else:
-                    # Remove visual markers for display
-                    content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
-                
-                if content:
-                    html_content += f"                                        <li>{content}</li>\n"
+            # Render enhanced content boxes instead of plain bullets
+            enhancements = slide.get('enhancements', [])
+            if enhancements:
+                for enh in enhancements:
+                    icon = enh.get('icon', '📌')
+                    box_type = enh.get('box_type', 'key-point')
+                    content = enh.get('enhanced') or enh.get('original', '')
+                    label = box_type.replace('-', ' ').title()
+                    
+                    html_content += f"""                                    <div class="content-box box-{box_type}">
+                                        <div class="content-box-icon">{icon}</div>
+                                        <div class="content-box-text">
+                                            <div class="label">{label}</div>
+                                            <p>{content}</p>
+                                        </div>
+                                    </div>
+"""
+            else:
+                # Fallback to regular bullets if no enhancements
+                html_content += """                                    <ul>
+"""
+                for i, bullet in enumerate(slide['bullets']):
+                    if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
+                        content = slide['generated_content'][i]
+                    else:
+                        content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
+                    
+                    if content:
+                        html_content += f"                                        <li>{content}</li>\n"
+                html_content += """                                    </ul>
+"""
             
-            html_content += """                                    </ul>
-                                </div>
+            html_content += """                                </div>
                             </div>
 """
         elif slide['has_visual']:
@@ -1578,44 +1793,76 @@ def generate_html_presentation(outline_text, presentation_title, include_quiz=Tr
             
             html_content += f"""                            <div class="slide-content-wrapper">
                                 <div class="slide-text">
-                                    <ul>
 """
             
-            # Use generated content instead of raw bullets
-            for i, bullet in enumerate(slide['bullets']):
-                # Get generated content or fall back to cleaned bullet
-                if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
-                    content = slide['generated_content'][i]
-                else:
-                    # Remove visual markers for display
-                    content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
-                
-                if content:
-                    html_content += f"                                        <li>{content}</li>\n"
+            # Render enhanced content boxes instead of plain bullets
+            enhancements = slide.get('enhancements', [])
+            if enhancements:
+                for enh in enhancements:
+                    icon = enh.get('icon', '📌')
+                    box_type = enh.get('box_type', 'key-point')
+                    content = enh.get('enhanced') or enh.get('original', '')
+                    label = box_type.replace('-', ' ').title()
+                    
+                    html_content += f"""                                    <div class="content-box box-{box_type}">
+                                        <div class="content-box-icon">{icon}</div>
+                                        <div class="content-box-text">
+                                            <div class="label">{label}</div>
+                                            <p>{content}</p>
+                                        </div>
+                                    </div>
+"""
+            else:
+                # Fallback to regular bullets if no enhancements
+                html_content += """                                    <ul>
+"""
+                for i, bullet in enumerate(slide['bullets']):
+                    if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
+                        content = slide['generated_content'][i]
+                    else:
+                        content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
+                    
+                    if content:
+                        html_content += f"                                        <li>{content}</li>\n"
+                html_content += """                                    </ul>
+"""
             
-            html_content += f"""                                    </ul>
-                                </div>
+            html_content += f"""                                </div>
                                 <div class="visual-note">📸 Visual: {visual_text}</div>
                             </div>
 """
         else:
-            # No image - just show bullet points
-            html_content += """                            <ul>
+            # No image - just show enhanced content boxes
+            # Render enhanced content boxes instead of plain bullets
+            enhancements = slide.get('enhancements', [])
+            if enhancements:
+                for enh in enhancements:
+                    icon = enh.get('icon', '📌')
+                    box_type = enh.get('box_type', 'key-point')
+                    content = enh.get('enhanced') or enh.get('original', '')
+                    label = box_type.replace('-', ' ').title()
+                    
+                    html_content += f"""                            <div class="content-box box-{box_type}">
+                                <div class="content-box-icon">{icon}</div>
+                                <div class="content-box-text">
+                                    <div class="label">{label}</div>
+                                    <p>{content}</p>
+                                </div>
+                            </div>
 """
-            
-            # Use generated content instead of raw bullets
-            for i, bullet in enumerate(slide['bullets']):
-                # Get generated content or fall back to cleaned bullet
-                if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
-                    content = slide['generated_content'][i]
-                else:
-                    # Remove visual markers for display
-                    content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
-                
-                if content:
-                    html_content += f"                                <li>{content}</li>\n"
-            
-            html_content += """                            </ul>
+            else:
+                # Fallback to regular bullets if no enhancements
+                html_content += """                            <ul>
+"""
+                for i, bullet in enumerate(slide['bullets']):
+                    if i < len(slide.get('generated_content', [])) and slide['generated_content'][i]:
+                        content = slide['generated_content'][i]
+                    else:
+                        content = re.sub(r'\[VISUAL:.*?\]|\[DIAGRAM:.*?\]', '', bullet).strip()
+                    
+                    if content:
+                        html_content += f"                                <li>{content}</li>\n"
+                html_content += """                            </ul>
 """
         
         html_content += """                        </div>
