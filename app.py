@@ -18,8 +18,6 @@ from io import BytesIO
 from PIL import Image
 from fpdf import FPDF
 import tempfile
-import pythoncom
-import win32com.client
 
 try:
     from html_generator import generate_html_from_outline
@@ -1174,34 +1172,6 @@ Ensure comprehensive coverage of all topics in the outline. Return Markdown ONLY
 # ==========================================
 # PPT GENERATION
 # ==========================================
-def convert_pptx_to_pdf(pptx_bytesio):
-    try:
-        pythoncom.CoInitialize()
-        ppt_app = win32com.client.Dispatch("PowerPoint.Application")
-        
-        temp_dir = tempfile.gettempdir()
-        base_name = f"temp_ppt_{int(time.time())}"
-        pptx_path = os.path.join(temp_dir, f"{base_name}.pptx")
-        pdf_path = os.path.join(temp_dir, f"{base_name}.pdf")
-        
-        with open(pptx_path, "wb") as f:
-            f.write(pptx_bytesio.getvalue())
-            
-        presentation = ppt_app.Presentations.Open(pptx_path, WithWindow=False)
-        presentation.SaveAs(pdf_path, 32)  # 32 = ppSaveAsPDF
-        presentation.Close()
-        
-        if os.path.exists(pdf_path):
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
-            return BytesIO(pdf_bytes)
-        return None
-    except Exception as e:
-        print(f"Error converting to PDF: {e}")
-        return None
-    finally:
-        pythoncom.CoUninitialize()
-
 def generate_ppt(class_num, subject, chapter, use_images):
     prompt = (GEMINI_PROMPT_TEMPLATE if use_images else GEMINI_PROMPT_TEXT_ONLY).format(
         class_num=class_num, subject=subject, chapter=chapter
@@ -1658,7 +1628,7 @@ with col1:
 with col2:
     output_types = st.multiselect(
         "What would you like to generate?",
-        ["Presentation (PPTX)", "Interactive HTML", "Study Notes (PDF)"],
+        ["Presentation (PPTX)", "Interactive HTML"],
         default=["Presentation (PPTX)", "Interactive HTML"]
     )
 
@@ -1723,11 +1693,6 @@ if st.button("🚀 Generate Content", type="primary", use_container_width=True):
             status.update(label="✅ Done! Your content is ready.", state="complete")
 
         # Download buttons
-        ppt_pdf_buf = None
-        if ppt_buf:
-            with st.spinner("Converting Presentation to PDF..."):
-                ppt_pdf_buf = convert_pptx_to_pdf(ppt_buf)
-
         if ppt_buf or html_buf or notes_buf:
             # Build output zip if multiple files
             if (ppt_buf and notes_buf) or (ppt_buf and html_buf) or (html_buf and notes_buf):
@@ -1736,8 +1701,6 @@ if st.button("🚀 Generate Content", type="primary", use_container_width=True):
                 with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                     if ppt_buf:
                         zf.writestr("Presentation.pptx", ppt_buf.getvalue())
-                    if ppt_pdf_buf:
-                        zf.writestr("Presentation.pdf", ppt_pdf_buf.getvalue())
                     if html_buf:
                         zf.writestr(html_filename if html_filename else "Presentation.html", html_buf.getvalue())
                     if notes_buf:
@@ -1761,14 +1724,6 @@ if st.button("🚀 Generate Content", type="primary", use_container_width=True):
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True
                 )
-                if ppt_pdf_buf:
-                    st.download_button(
-                        "📄 Download Presentation (PDF)",
-                        data=ppt_pdf_buf,
-                        file_name=ppt_filename.replace('.pptx', '.pdf'),
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
 
             if html_buf:
                 st.download_button(
