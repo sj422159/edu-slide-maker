@@ -821,7 +821,7 @@ Format:
 ---
 
 ## Section B: Very Short Answer (1 Mark)
-(20 questions. 1-2 sentence answers.)
+(20 questions. 5-6 sentence answers.)
 
 **Q1.** Question
 **Ans:** Answer
@@ -829,7 +829,7 @@ Format:
 ---
 
 ## Section C: Short Answer (2-3 Marks)
-(15 questions. 4-6 sentence answers with key terms.)
+(15 questions. 10-20 sentence answers with key terms.)
 
 **Q1.** Question
 **Ans:** Answer
