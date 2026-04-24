@@ -20,14 +20,20 @@ API_KEY = os.getenv('GEMINI_API_KEY')
 client = genai.Client(api_key=API_KEY)
 
 # Professional Color Palette
-DARK_BG       = RGBColor(3, 0, 46)
-ACCENT_BG     = RGBColor(30, 60, 114)
-CARD_BG       = RGBColor(34, 40, 60)
-WHITE         = RGBColor(255, 255, 255)
-LIGHT_GRAY    = RGBColor(200, 210, 225)
-ACCENT_GOLD   = RGBColor(255, 196, 61)
-ACCENT_CYAN   = RGBColor(0, 188, 212)
-SUBTLE_GRAY   = RGBColor(120, 130, 150)
+# Backgrounds
+DARK_BG       = RGBColor(255, 255, 255)   # White background
+ACCENT_BG     = RGBColor(240, 245, 255)   # Very light blue (section bg)
+CARD_BG       = RGBColor(255, 255, 255)   # White cards
+
+# Text colors
+WHITE         = RGBColor(0, 32, 96)       # Deep blue (main text)
+LIGHT_GRAY    = RGBColor(70, 90, 140)     # Medium blue-gray (secondary text)
+SUBTLE_GRAY   = RGBColor(120, 140, 200)   # Light blue (subtle text)
+
+# Accents
+ACCENT_GOLD   = RGBColor(0, 102, 204)     # Primary blue accent
+ACCENT_CYAN   = RGBColor(0, 153, 255)     # Bright blue highlight
+
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
