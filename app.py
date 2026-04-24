@@ -689,7 +689,7 @@ Use this EXACT format for every question:
 ---
 
 ## Section B: Very Short Answer Questions (1 Mark)
-(Write 15 questions. Each answer should be 1-2 sentences.)
+(Write 15 questions. Each answer should be 3-4 sentences.)
 
 Format:
 **Q1.** Question
@@ -698,7 +698,7 @@ Format:
 ---
 
 ## Section C: Short Answer Questions (2–3 Marks)
-(Write 15 questions. Each answer should be 4-6 sentences with key terms.)
+(Write 15 questions. Each answer should be 10-20 sentences with key terms.)
 
 Format:
 **Q1.** Question
