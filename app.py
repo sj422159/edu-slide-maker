@@ -1,7 +1,7 @@
 import os
 import re
 import io
-import time
+import unicodedata
 import streamlit as st
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -36,6 +36,31 @@ WHITE_TEXT = (240, 240, 250)
 BODY_TEXT = (210, 215, 230)
 
 # ==========================================
+# UTILITY: TEXT NORMALIZATION
+# ==========================================
+def normalize_pdf_text(text):
+    """
+    Converts 'smart' quotes and high-unicode characters to Latin-1 
+    compatible characters to prevent FPDF Helvetica errors.
+    """
+    if not text:
+        return ""
+    
+    # Specific common LLM replacements
+    replacements = {
+        '\u2018': "'", '\u2019': "'",  # Smart single quotes
+        '\u201c': '"', '\u201d': '"',  # Smart double quotes
+        '\u2013': '-', '\u2014': '-',  # Dashes
+        '\u2022': '*',                  # Bullets
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    
+    # Fallback: Normalize to NFKD and drop non-latin1
+    normalized = unicodedata.normalize('NFKD', text)
+    return normalized.encode('latin-1', 'replace').decode('latin-1')
+
+# ==========================================
 # LATEX RENDERING ENGINE
 # ==========================================
 def render_latex_to_image(latex_str, font_size=12, color='#D2D7E6'):
@@ -46,6 +71,7 @@ def render_latex_to_image(latex_str, font_size=12, color='#D2D7E6'):
     plt.rc('text', usetex=False)
     fig = plt.figure(figsize=(0.01, 0.01)) 
     
+    # Matplotlib handles its own rendering regardless of FPDF font limitations
     fig.text(0, 0, latex_str, fontsize=font_size, color=color)
     plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0.02, dpi=300)
     plt.close(fig)
@@ -69,15 +95,14 @@ def fetch_content(class_num, subject, chapter):
 
     for model_name in GEMINI_MODELS:
         try:
-            st.write(f"📡 Attempting with {model_name}...")
+            # We use st.write inside the status context in the main block
             response = client.models.generate_content(
                 model=model_name,
                 contents=prompt
             )
             if response.text:
                 return response.text
-        except Exception as e:
-            st.warning(f"⚠️ {model_name} failed: {str(e)[:100]}... Trying next model.")
+        except Exception:
             continue
             
     raise RuntimeError("All Gemini models failed. Please check your API key or connection.")
@@ -99,10 +124,13 @@ class NotesPDF(FPDF):
             self.set_font('Helvetica', 'B', 8)
             self.set_text_color(*CYAN)
             self.set_xy(10, 4)
-            self.cell(0, 6, self.title_info, align='R')
+            self.cell(0, 6, normalize_pdf_text(self.title_info), align='R')
             self.set_y(20)
 
 def process_text_line(pdf, line):
+    # Normalize the line for Helvetica
+    line = normalize_pdf_text(line)
+    
     parts = re.split(r'(\$.*?\$)', line)
     pdf.set_font('Helvetica', '', 11)
     pdf.set_text_color(*BODY_TEXT)
@@ -123,32 +151,37 @@ def process_text_line(pdf, line):
                 pdf.image(img_buf, x=x, y=y, h=h_mm)
                 pdf.set_x(x + w_mm + 1)
             except:
+                # Fallback to plain text if rendering fails
                 pdf.write(5, part.replace('$', ''))
         else:
             pdf.write(5, part)
     pdf.ln(7)
 
-def generate_educational_notes(class_num, subject, chapter):
+def generate_educational_notes(class_num, subject, chapter, status_obj):
+    status_obj.write("🤖 Querying Gemini models (Failover active)...")
     raw_markdown = fetch_content(class_num, subject, chapter)
     
+    status_obj.write("🖋️ Building PDF Structure...")
     title_info = f"Class {class_num} | {subject} | {chapter}"
     pdf = NotesPDF(title_info)
     pdf.set_auto_page_break(auto=True, margin=20)
     
-    # Cover
+    # Cover Page
     pdf.add_page()
     pdf.set_fill_color(*NAVY)
     pdf.rect(0, 0, pdf.w, pdf.h, 'F')
     pdf.set_y(100)
     pdf.set_font('Helvetica', 'B', 28)
     pdf.set_text_color(*GOLD)
-    pdf.multi_cell(0, 15, chapter.upper(), align='C')
+    pdf.multi_cell(0, 15, normalize_pdf_text(chapter.upper()), align='C')
+    
     pdf.set_font('Helvetica', '', 16)
     pdf.set_text_color(*WHITE_TEXT)
-    pdf.cell(0, 20, f"{subject} - Study Guide", ln=True, align='C')
+    pdf.cell(0, 20, normalize_pdf_text(f"{subject} - Study Guide"), ln=True, align='C')
     
-    # Body
+    # Body Pages
     pdf.add_page()
+    status_obj.write("🎨 Rendering LaTeX and Typography...")
     for line in raw_markdown.split('\n'):
         line = line.strip()
         if not line:
@@ -159,12 +192,12 @@ def generate_educational_notes(class_num, subject, chapter):
             pdf.ln(5)
             pdf.set_font('Helvetica', 'B', 16)
             pdf.set_text_color(*GOLD)
-            pdf.cell(0, 10, line[3:], ln=True)
+            pdf.cell(0, 10, normalize_pdf_text(line[3:]), ln=True)
             pdf.ln(2)
         elif line.startswith('### '):
             pdf.set_font('Helvetica', 'B', 13)
             pdf.set_text_color(*CYAN)
-            pdf.cell(0, 10, line[4:], ln=True)
+            pdf.cell(0, 10, normalize_pdf_text(line[4:]), ln=True)
         else:
             process_text_line(pdf, line)
 
@@ -179,7 +212,7 @@ def generate_educational_notes(class_num, subject, chapter):
 st.set_page_config(page_title="Notes Microservice", page_icon="🧪")
 
 st.title("🧪 Smart Education Engine")
-st.markdown("Generates perfect LaTeX notes with automated model failover.")
+st.markdown("Generates perfect LaTeX notes with automated model failover and Unicode sanitization.")
 
 col1, col2, col3 = st.columns(3)
 with col1: cls = st.text_input("Class", "12")
@@ -188,11 +221,11 @@ with col3: chp = st.text_input("Chapter", "Chemical Kinetics")
 
 if st.button("🚀 Generate PDF Notes", use_container_width=True):
     if not API_KEY:
-        st.error("API Key missing.")
+        st.error("API Key missing from environment.")
     else:
         with st.status("Initializing AI Pipeline...", expanded=True) as status:
             try:
-                pdf_data = generate_educational_notes(cls, sub, chp)
+                pdf_data = generate_educational_notes(cls, sub, chp, status)
                 status.update(label="✅ PDF Generated Successfully!", state="complete")
                 st.download_button(
                     label="📥 Download Study Guide",
