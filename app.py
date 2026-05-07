@@ -40,36 +40,41 @@ BODY_TEXT = (210, 215, 230)
 # ==========================================
 def normalize_pdf_text(text):
     """
-    Sanitizes AI-generated text for FPDF's Latin-1 limitations.
-    Prevents the 'Character outside range' error.
+    Aggressively sanitizes text for FPDF's Latin-1 limitations.
+    Converts smart quotes and strips unsupported characters.
     """
     if not text: return ""
+    
+    # 1. Manual map for common LLM typography
     replacements = {
         '\u2018': "'", '\u2019': "'", '\u201a': "'",
         '\u201c': '"', '\u201d': '"', '\u201e': '"',
         '\u2013': '-', '\u2014': '-', '\u2022': '*',
-        '\u2112': 'L', '\u2115': 'N', '\u211d': 'R',
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
     
-    # Remove characters that cannot be represented in Latin-1
-    return unicodedata.normalize('NFKD', text).encode('latin-1', 'replace').decode('latin-1')
+    # 2. Normalize Unicode to decompose characters (e.g., accents)
+    text = unicodedata.normalize('NFKD', text)
+    
+    # 3. Encode to latin-1, ignoring errors, then decode back
+    return text.encode('latin-1', 'ignore').decode('latin-1')
 
 # ==========================================
 # LATEX RENDERING ENGINE
 # ==========================================
 def render_latex_to_image(latex_str, font_size=12, color='#D2D7E6'):
-    """Renders LaTeX into high-res transparent PNGs via Matplotlib."""
+    """Renders LaTeX into high-res transparent PNGs."""
     if not latex_str.startswith('$'):
         latex_str = f"${latex_str}$"
     
     buf = io.BytesIO()
-    plt.rc('text', usetex=False) # Use Matplotlib's internal parser
+    plt.rc('text', usetex=False)
     fig = plt.figure(figsize=(0.01, 0.01)) 
     
+    # Note: Matplotlib handles the full Unicode range for math
     fig.text(0, 0, latex_str, fontsize=font_size, color=color)
-    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0.03, dpi=300)
+    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0.04, dpi=300)
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -78,24 +83,20 @@ def render_latex_to_image(latex_str, font_size=12, color='#D2D7E6'):
 # CONTENT GENERATION (EXHAUSTIVE MODE)
 # ==========================================
 def fetch_content(class_num, subject, chapter):
-    """Generates detailed educational content with model failover."""
     prompt = f"""
     You are an expert {subject} educator. Generate an EXHAUSTIVE, high-level study guide for "{chapter}" for Class {class_num}.
     
-    CONTENT STRUCTURE REQUIRED:
-    1. Comprehensive Chapter Overview (Minimum 300 words).
-    2. Detailed Concepts: Break down every sub-topic with deep technical explanations.
-    3. Mathematical/Scientific Foundations: Explicitly state all laws, derivations, and formulas.
-    4. Comparative Analysis: Tables or lists comparing related concepts (e.g., A vs B).
-    5. Solved Numerical Examples: Provide 5 step-by-step solved problems.
-    6. Question Bank:
-       - 20 MCQs with reasoning for answers.
-       - 15 Short Answer questions (3 marks each).
-       - 10 Long Answer/Essay questions (5 marks each).
+    STRUCTURE:
+    1. Comprehensive Overview (300+ words).
+    2. Deep Concept Breakdowns.
+    3. Mathematical Foundations with all laws and derivations.
+    4. Comparative Tables.
+    5. 5 Solved Step-by-Step Problems.
+    6. Question Bank: 20 MCQs, 15 Short, 10 Long questions with answers.
     
     TECHNICAL RULES:
-    - ALWAYS wrap math symbols, variables, equations, and chemical formulas in single dollar signs ($).
-    - Use LaTeX strictly (e.g., $\\Delta H$, $C_6H_{{12}}O_6$, $\\int_0^\\infty$).
+    - ALWAYS wrap ALL math/symbols/equations in single dollar signs ($).
+    - Example: Use $V_0 = \\left( \\frac{{h}}{{e}} \\right) f - \\frac{{\\Phi}}{{e}}$.
     - Use Markdown headers (##, ###).
     """
 
@@ -105,7 +106,7 @@ def fetch_content(class_num, subject, chapter):
             if response.text: return response.text
         except Exception: continue
             
-    raise RuntimeError("Critical Error: All AI nodes failed to respond.")
+    raise RuntimeError("Critical Error: All Gemini models failed.")
 
 # ==========================================
 # PDF COMPILER
@@ -128,11 +129,9 @@ class NotesPDF(FPDF):
             self.set_y(20)
 
 def process_text_line(pdf, line):
-    """Handles hybrid text-LaTeX line rendering."""
-    line = normalize_pdf_text(line)
+    """Processes lines, keeping LaTeX as images and text as normalized strings."""
+    # Split by LaTeX blocks first
     parts = re.split(r'(\$.*?\$)', line)
-    pdf.set_font('Helvetica', '', 11)
-    pdf.set_text_color(*BODY_TEXT)
     
     for part in parts:
         if part.startswith('$') and part.endswith('$'):
@@ -140,7 +139,7 @@ def process_text_line(pdf, line):
                 img_buf = render_latex_to_image(part)
                 img = Image.open(img_buf)
                 w_px, h_px = img.size
-                h_mm = 4.8  # Slightly larger for better readability
+                h_mm = 5.0 # Match text height
                 w_mm = (w_px / h_px) * h_mm
                 
                 if pdf.get_x() + w_mm > (pdf.w - 15):
@@ -150,16 +149,24 @@ def process_text_line(pdf, line):
                 pdf.image(img_buf, x=x, y=y, h=h_mm)
                 pdf.set_x(x + w_mm + 1)
             except:
-                pdf.write(5, part.replace('$', ''))
+                # If LaTeX render fails, strip $ and normalize
+                clean_part = normalize_pdf_text(part.replace('$', ''))
+                pdf.set_font('Helvetica', '', 11)
+                pdf.set_text_color(*BODY_TEXT)
+                pdf.write(5, clean_part)
         else:
-            pdf.write(5, part)
+            # Normalize plain text parts
+            clean_text = normalize_pdf_text(part)
+            pdf.set_font('Helvetica', '', 11)
+            pdf.set_text_color(*BODY_TEXT)
+            pdf.write(5, clean_text)
     pdf.ln(8)
 
 def generate_educational_notes(class_num, subject, chapter, status):
-    status.write("🧠 Accessing Deep Knowledge Base...")
+    status.write("🧠 Gathering exhaustive data...")
     raw_markdown = fetch_content(class_num, subject, chapter)
     
-    status.write("📐 Configuring Page Layouts...")
+    status.write("📐 Generating high-res formulas...")
     title_info = f"Class {class_num} | {subject} | {chapter}"
     pdf = NotesPDF(title_info)
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -178,7 +185,6 @@ def generate_educational_notes(class_num, subject, chapter, status):
     
     # -- Body Pages --
     pdf.add_page()
-    status.write("🖋️ Typesetting Complex Formulas...")
     for line in raw_markdown.split('\n'):
         line = line.strip()
         if not line:
@@ -189,11 +195,8 @@ def generate_educational_notes(class_num, subject, chapter, status):
             pdf.set_font('Helvetica', 'B', 17)
             pdf.set_text_color(*GOLD)
             pdf.cell(0, 10, normalize_pdf_text(line[3:]), ln=True)
-            pdf.set_draw_color(*GOLD)
-            pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 50, pdf.get_y())
             pdf.ln(4)
         elif line.startswith('### '):
-            pdf.ln(2)
             pdf.set_font('Helvetica', 'B', 14)
             pdf.set_text_color(*CYAN)
             pdf.cell(0, 10, normalize_pdf_text(line[4:]), ln=True)
@@ -208,33 +211,30 @@ def generate_educational_notes(class_num, subject, chapter, status):
 # ==========================================
 # INTERFACE
 # ==========================================
-st.set_page_config(page_title="EduNotes Microservice", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Notes Microservice", page_icon="🧬")
 
-st.title("🧬 EduNotes: Exhaustive Knowledge Engine")
-st.markdown("Generates detailed, LaTeX-ready notes with textbook-quality formatting.")
+st.title("🧬 Exhaustive Education Engine")
+st.markdown("Generates perfect LaTeX notes with failover and character safety.")
 
-with st.sidebar:
-    st.header("Parameters")
-    cls = st.selectbox("Select Class", [str(i) for i in range(1, 13)], index=11)
-    sub = st.text_input("Subject", "Physics")
-    chp = st.text_input("Chapter", "Quantum Mechanics")
-    st.info("Uses sequential model failover for 100% uptime.")
+cls = st.sidebar.selectbox("Class", [str(i) for i in range(1, 13)], index=11)
+sub = st.sidebar.text_input("Subject", "Physics")
+chp = st.sidebar.text_input("Chapter", "Dual Nature of Radiation")
 
-if st.button("🚀 Start Deep Generation", use_container_width=True):
+if st.button("🚀 Generate Full Notes", use_container_width=True):
     if not API_KEY:
-        st.error("Missing Environment Variable: GEMINI_API_KEY")
+        st.error("Missing GEMINI_API_KEY")
     else:
-        with st.status("Initializing High-Fidelity Pipeline...", expanded=True) as status:
+        with st.status("Initializing...", expanded=True) as status:
             try:
                 pdf_data = generate_educational_notes(cls, sub, chp, status)
-                status.update(label="✨ Exhaustive Notes Compiled!", state="complete")
+                status.update(label="✅ Compilation Complete!", state="complete")
                 st.download_button(
-                    label="📥 Download Detailed Study Guide (PDF)",
+                    label="📥 Download Detailed PDF",
                     data=pdf_data,
                     file_name=f"{chp}_Complete_Notes.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
             except Exception as e:
-                status.update(label="❌ Generation Failed", state="error")
-                st.error(f"Traceback: {e}")
+                status.update(label="❌ Failed", state="error")
+                st.error(f"Error detail: {str(e)}")
