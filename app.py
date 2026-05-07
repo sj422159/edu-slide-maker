@@ -27,7 +27,7 @@ GEMINI_MODELS = [
     "gemini-1.5-flash-8b",
 ]
 
-# Design Palette
+# Professional Dark Palette
 NAVY = (3, 0, 46)
 GOLD = (255, 196, 61)
 CYAN = (0, 188, 212)
@@ -40,75 +40,75 @@ BODY_TEXT = (210, 215, 230)
 # ==========================================
 def normalize_pdf_text(text):
     """
-    Converts 'smart' quotes and high-unicode characters to Latin-1 
-    compatible characters to prevent FPDF Helvetica errors.
+    Sanitizes AI-generated text for FPDF's Latin-1 limitations.
+    Prevents the 'Character outside range' error.
     """
-    if not text:
-        return ""
-    
-    # Specific common LLM replacements
+    if not text: return ""
     replacements = {
-        '\u2018': "'", '\u2019': "'",  # Smart single quotes
-        '\u201c': '"', '\u201d': '"',  # Smart double quotes
-        '\u2013': '-', '\u2014': '-',  # Dashes
-        '\u2022': '*',                  # Bullets
+        '\u2018': "'", '\u2019': "'", '\u201a': "'",
+        '\u201c': '"', '\u201d': '"', '\u201e': '"',
+        '\u2013': '-', '\u2014': '-', '\u2022': '*',
+        '\u2112': 'L', '\u2115': 'N', '\u211d': 'R',
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
     
-    # Fallback: Normalize to NFKD and drop non-latin1
-    normalized = unicodedata.normalize('NFKD', text)
-    return normalized.encode('latin-1', 'replace').decode('latin-1')
+    # Remove characters that cannot be represented in Latin-1
+    return unicodedata.normalize('NFKD', text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==========================================
 # LATEX RENDERING ENGINE
 # ==========================================
 def render_latex_to_image(latex_str, font_size=12, color='#D2D7E6'):
+    """Renders LaTeX into high-res transparent PNGs via Matplotlib."""
     if not latex_str.startswith('$'):
         latex_str = f"${latex_str}$"
     
     buf = io.BytesIO()
-    plt.rc('text', usetex=False)
+    plt.rc('text', usetex=False) # Use Matplotlib's internal parser
     fig = plt.figure(figsize=(0.01, 0.01)) 
     
-    # Matplotlib handles its own rendering regardless of FPDF font limitations
     fig.text(0, 0, latex_str, fontsize=font_size, color=color)
-    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0.02, dpi=300)
+    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0.03, dpi=300)
     plt.close(fig)
     buf.seek(0)
     return buf
 
 # ==========================================
-# CONTENT GENERATION WITH FAILOVER
+# CONTENT GENERATION (EXHAUSTIVE MODE)
 # ==========================================
 def fetch_content(class_num, subject, chapter):
+    """Generates detailed educational content with model failover."""
     prompt = f"""
-    You are an expert {subject} teacher. Create a COMPLETE, highly detailed study guide for "{chapter}" for Class {class_num}.
+    You are an expert {subject} educator. Generate an EXHAUSTIVE, high-level study guide for "{chapter}" for Class {class_num}.
     
-    STRICT RULES:
-    1. Use LaTeX for ALL math/science symbols, equations, and chemical formulas. Wrap them in single dollar signs.
-       Example: Use $\\rightarrow$ for arrows, $H_2O$ for water, and $x^2$ for squares.
-    2. Format using Markdown headers (## for sections, ### for sub-sections).
-    3. Include 15 MCQs, 10 Short Answer, and 5 Long Answer questions at the end with detailed model answers.
-    4. Provide exhaustive theory notes.
+    CONTENT STRUCTURE REQUIRED:
+    1. Comprehensive Chapter Overview (Minimum 300 words).
+    2. Detailed Concepts: Break down every sub-topic with deep technical explanations.
+    3. Mathematical/Scientific Foundations: Explicitly state all laws, derivations, and formulas.
+    4. Comparative Analysis: Tables or lists comparing related concepts (e.g., A vs B).
+    5. Solved Numerical Examples: Provide 5 step-by-step solved problems.
+    6. Question Bank:
+       - 20 MCQs with reasoning for answers.
+       - 15 Short Answer questions (3 marks each).
+       - 10 Long Answer/Essay questions (5 marks each).
+    
+    TECHNICAL RULES:
+    - ALWAYS wrap math symbols, variables, equations, and chemical formulas in single dollar signs ($).
+    - Use LaTeX strictly (e.g., $\\Delta H$, $C_6H_{{12}}O_6$, $\\int_0^\\infty$).
+    - Use Markdown headers (##, ###).
     """
 
     for model_name in GEMINI_MODELS:
         try:
-            # We use st.write inside the status context in the main block
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-            if response.text:
-                return response.text
-        except Exception:
-            continue
+            response = client.models.generate_content(model=model_name, contents=prompt)
+            if response.text: return response.text
+        except Exception: continue
             
-    raise RuntimeError("All Gemini models failed. Please check your API key or connection.")
+    raise RuntimeError("Critical Error: All AI nodes failed to respond.")
 
 # ==========================================
-# PDF ENGINE
+# PDF COMPILER
 # ==========================================
 class NotesPDF(FPDF):
     def __init__(self, title_info):
@@ -128,9 +128,8 @@ class NotesPDF(FPDF):
             self.set_y(20)
 
 def process_text_line(pdf, line):
-    # Normalize the line for Helvetica
+    """Handles hybrid text-LaTeX line rendering."""
     line = normalize_pdf_text(line)
-    
     parts = re.split(r'(\$.*?\$)', line)
     pdf.set_font('Helvetica', '', 11)
     pdf.set_text_color(*BODY_TEXT)
@@ -141,61 +140,61 @@ def process_text_line(pdf, line):
                 img_buf = render_latex_to_image(part)
                 img = Image.open(img_buf)
                 w_px, h_px = img.size
-                h_mm = 4.5
+                h_mm = 4.8  # Slightly larger for better readability
                 w_mm = (w_px / h_px) * h_mm
                 
                 if pdf.get_x() + w_mm > (pdf.w - 15):
-                    pdf.ln(6)
+                    pdf.ln(7)
                 
                 x, y = pdf.get_x(), pdf.get_y()
                 pdf.image(img_buf, x=x, y=y, h=h_mm)
                 pdf.set_x(x + w_mm + 1)
             except:
-                # Fallback to plain text if rendering fails
                 pdf.write(5, part.replace('$', ''))
         else:
             pdf.write(5, part)
-    pdf.ln(7)
+    pdf.ln(8)
 
-def generate_educational_notes(class_num, subject, chapter, status_obj):
-    status_obj.write("🤖 Querying Gemini models (Failover active)...")
+def generate_educational_notes(class_num, subject, chapter, status):
+    status.write("🧠 Accessing Deep Knowledge Base...")
     raw_markdown = fetch_content(class_num, subject, chapter)
     
-    status_obj.write("🖋️ Building PDF Structure...")
+    status.write("📐 Configuring Page Layouts...")
     title_info = f"Class {class_num} | {subject} | {chapter}"
     pdf = NotesPDF(title_info)
     pdf.set_auto_page_break(auto=True, margin=20)
     
-    # Cover Page
+    # -- Cover Page --
     pdf.add_page()
     pdf.set_fill_color(*NAVY)
     pdf.rect(0, 0, pdf.w, pdf.h, 'F')
-    pdf.set_y(100)
-    pdf.set_font('Helvetica', 'B', 28)
+    pdf.set_y(90)
+    pdf.set_font('Helvetica', 'B', 32)
     pdf.set_text_color(*GOLD)
     pdf.multi_cell(0, 15, normalize_pdf_text(chapter.upper()), align='C')
-    
-    pdf.set_font('Helvetica', '', 16)
+    pdf.set_font('Helvetica', '', 18)
     pdf.set_text_color(*WHITE_TEXT)
-    pdf.cell(0, 20, normalize_pdf_text(f"{subject} - Study Guide"), ln=True, align='C')
+    pdf.cell(0, 20, normalize_pdf_text(f"Exhaustive Study Guide | {subject}"), ln=True, align='C')
     
-    # Body Pages
+    # -- Body Pages --
     pdf.add_page()
-    status_obj.write("🎨 Rendering LaTeX and Typography...")
+    status.write("🖋️ Typesetting Complex Formulas...")
     for line in raw_markdown.split('\n'):
         line = line.strip()
         if not line:
-            pdf.ln(3)
-            continue
+            pdf.ln(4); continue
             
         if line.startswith('## '):
-            pdf.ln(5)
-            pdf.set_font('Helvetica', 'B', 16)
+            pdf.ln(6)
+            pdf.set_font('Helvetica', 'B', 17)
             pdf.set_text_color(*GOLD)
             pdf.cell(0, 10, normalize_pdf_text(line[3:]), ln=True)
-            pdf.ln(2)
+            pdf.set_draw_color(*GOLD)
+            pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 50, pdf.get_y())
+            pdf.ln(4)
         elif line.startswith('### '):
-            pdf.set_font('Helvetica', 'B', 13)
+            pdf.ln(2)
+            pdf.set_font('Helvetica', 'B', 14)
             pdf.set_text_color(*CYAN)
             pdf.cell(0, 10, normalize_pdf_text(line[4:]), ln=True)
         else:
@@ -207,33 +206,35 @@ def generate_educational_notes(class_num, subject, chapter, status_obj):
     return buf
 
 # ==========================================
-# MICRO-INTERFACE
+# INTERFACE
 # ==========================================
-st.set_page_config(page_title="Notes Microservice", page_icon="🧪")
+st.set_page_config(page_title="EduNotes Microservice", page_icon="🧬", layout="wide")
 
-st.title("🧪 Smart Education Engine")
-st.markdown("Generates perfect LaTeX notes with automated model failover and Unicode sanitization.")
+st.title("🧬 EduNotes: Exhaustive Knowledge Engine")
+st.markdown("Generates detailed, LaTeX-ready notes with textbook-quality formatting.")
 
-col1, col2, col3 = st.columns(3)
-with col1: cls = st.text_input("Class", "12")
-with col2: sub = st.text_input("Subject", "Chemistry")
-with col3: chp = st.text_input("Chapter", "Chemical Kinetics")
+with st.sidebar:
+    st.header("Parameters")
+    cls = st.selectbox("Select Class", [str(i) for i in range(1, 13)], index=11)
+    sub = st.text_input("Subject", "Physics")
+    chp = st.text_input("Chapter", "Quantum Mechanics")
+    st.info("Uses sequential model failover for 100% uptime.")
 
-if st.button("🚀 Generate PDF Notes", use_container_width=True):
+if st.button("🚀 Start Deep Generation", use_container_width=True):
     if not API_KEY:
-        st.error("API Key missing from environment.")
+        st.error("Missing Environment Variable: GEMINI_API_KEY")
     else:
-        with st.status("Initializing AI Pipeline...", expanded=True) as status:
+        with st.status("Initializing High-Fidelity Pipeline...", expanded=True) as status:
             try:
                 pdf_data = generate_educational_notes(cls, sub, chp, status)
-                status.update(label="✅ PDF Generated Successfully!", state="complete")
+                status.update(label="✨ Exhaustive Notes Compiled!", state="complete")
                 st.download_button(
-                    label="📥 Download Study Guide",
+                    label="📥 Download Detailed Study Guide (PDF)",
                     data=pdf_data,
-                    file_name=f"{chp}_Notes.pdf",
+                    file_name=f"{chp}_Complete_Notes.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
             except Exception as e:
-                status.update(label="❌ Pipeline Failed", state="error")
-                st.error(f"Error: {e}")
+                status.update(label="❌ Generation Failed", state="error")
+                st.error(f"Traceback: {e}")
